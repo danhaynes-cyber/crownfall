@@ -45,6 +45,15 @@ On the field:
 - After you hold more cities than a rival, **Offer the Yoke**. They keep
   remaining cities, cannot fight, and send half their gold and science.
   Vassals count for the liege on domination.
+- **Found Charter** plants Veinwright (Delving + a city working ore) or
+  Sheafhall (a city working grain). The HQ stays in that city.
+  **Spread Charter** walks a road for free when the destination has the
+  matching resource; otherwise it costs a little gold. A charter pays
+  extra gold (and Veinwright, production) on matching worked resources,
+  and costs 1 food upkeep in each city that hosts it.
+- Spy points accrue each turn. **Scout Rival** pierces fog over a rival
+  city this turn. **Steal a Craft** copies a tech they know. **Foment
+  Unrest** cuts stored production and culture in a visible rival city.
 - Last **sovereign** with a city wins (**domination**), counting liege +
   vassals as one side. Hosts that never settled still contend while they
   have units. After turn 40 the highest chronicle wins
@@ -88,15 +97,17 @@ GameState JSON -> AiBrain.decide(state) -> [Action, ...]
 
 - **RuleBrain** (default): settle, improve, garrison, escort, explore,
   research, found/adopt a faith, pick civics without thrashing, assign
-  specialists, vassalize a weaker multi-city rival, and assault a city
-  only when it should win.
+  specialists, vassalize a weaker multi-city rival, found and spread
+  charters, spend spy points, and assault a city only when it should win.
 - **HttpBrain**: `POST` the snapshot to a URL; on timeout or error, fall
   back to RuleBrain. The match polls the HTTP client so the UI stays live.
 
 Brains do not touch Godot nodes. The rules engine rejects illegal moves.
 The snapshot includes fog of war, culture owners, cities (with defense,
-garrison, and specialists), units, resources, scores, techs, faiths, civics,
-vassal ties, victory fields, and the legal action list.
+garrison, specialists, and charters), units, resources, scores, techs,
+faiths, civics, corporations, your espionage points, vassal ties, victory
+fields, and the legal action list. Brains never see a rival's private
+gold or science.
 
 See [`docs/AI_PROTOCOL.md`](docs/AI_PROTOCOL.md) and [`ai/README.md`](ai/README.md).
 
@@ -122,10 +133,11 @@ docs/AI_PROTOCOL.md    JSON schema for a later model API
 tools/run_smoke.sh     downloads nothing; uses Godot on PATH
 ```
 
-Corporations and espionage remain reserved. Culture borders, techs, capture,
-victory, faiths, civics, specialists, and vassals are live. `hooks.civics`,
-`hooks.state_religion`, `hooks.vassal_of`, `hooks.vassals`, and city
-specialist fields are filled.
+Culture borders, techs, capture, victory, faiths, civics, specialists,
+vassals, corporations, and espionage are live. `hooks.civics`,
+`hooks.state_religion`, `hooks.vassal_of`, `hooks.vassals`,
+`hooks.corporations`, `hooks.espionage_points`, and city specialist /
+charter fields are filled.
 
 ## Headless smoke test
 
@@ -138,9 +150,10 @@ With Godot 4.4 on `PATH` as `godot`:
 The script imports the project, then runs `godot/tests/smoke_test.gd`. It
 starts a game, founds a city, grows culture, builds a farm and road, researches
 a craft, captures a city, founds and adopts a faith, adopts a civic, assigns a
-specialist, vassalizes a two-city loser, hits a victory, reloads a save, ends
-the turn, checks RuleBrain garrison/escort/conquest/faith/civic policy, and
-checks that HttpBrain falls back when the URL is dead.
+specialist, vassalizes a two-city loser, founds and spreads a charter, runs an
+espionage mission, hits a victory, reloads a save, ends the turn, checks
+RuleBrain garrison/escort/conquest/faith/civic/spy policy, and checks that
+HttpBrain falls back when the URL is dead.
 
 CI runs the same path on Linux. Develop on Linux or Mac; export the `.app`
 from a Mac with Godot's macOS export templates.

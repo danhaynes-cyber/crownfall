@@ -57,6 +57,11 @@ func _build_hud() -> void:
 	hud.civic_pressed.connect(_on_civic)
 	hud.specialist_pressed.connect(_on_specialist)
 	hud.vassal_pressed.connect(_on_vassal)
+	hud.found_corp_pressed.connect(_on_found_corp)
+	hud.spread_corp_pressed.connect(_on_spread_corp)
+	hud.scout_pressed.connect(_on_scout)
+	hud.steal_tech_pressed.connect(_on_steal_tech)
+	hud.foment_pressed.connect(_on_foment)
 	hud.save_pressed.connect(_on_save)
 	hud.title_pressed.connect(_show_title)
 
@@ -87,13 +92,13 @@ func _build_title() -> void:
 	var blurb := Label.new()
 	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	blurb.custom_minimum_size = Vector2(640, 0)
-	blurb.text = "Found a city, claim the hinterland, raise laborers, and study Delving, Skyfletch, or Ashlar. Assault a rival city. Found a faith. Adopt Crown and Labor civics, assign chroniclers and wrights, or offer the yoke to a weaker host. Last sovereign standing — counting vassals — or the highest chronicle after turn 40 wins."
+	blurb.text = "Found a city, claim the hinterland, raise laborers, and study Delving, Skyfletch, or Ashlar. Assault a rival city. Found a faith. Adopt Crown and Labor civics, assign chroniclers and wrights, or offer the yoke to a weaker host. Found a charter on ore or grain. Spend spy points to scout, steal a craft, or foment unrest. Last sovereign standing — counting vassals — or the highest chronicle after turn 40 wins."
 	blurb.add_theme_color_override("font_color", Color(0.74, 0.70, 0.62))
 	box.add_child(blurb)
 	var how := Label.new()
 	how.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	how.custom_minimum_size = Vector2(640, 0)
-	how.text = "Play: New Game or Continue · move · Found City · assault a city · civics / specialists / Offer the Yoke · Save Chronicle · End Turn.\nCamera: WASD / arrows, mouse wheel, right-drag.\nSaves write to user://crownfall_save.json (Godot user data)."
+	how.text = "Play: New Game or Continue · move · Found City · assault a city · civics / specialists / Offer the Yoke · Found / Spread a charter · Scout / Steal a Craft / Foment · Save Chronicle · End Turn.\nCamera: WASD / arrows, mouse wheel, right-drag.\nSaves write to user://crownfall_save.json (Godot user data)."
 	how.add_theme_color_override("font_color", Color(0.68, 0.64, 0.56))
 	box.add_child(how)
 	var new_game := Button.new()
@@ -336,6 +341,44 @@ func _on_vassal() -> void:
 		return
 	for action in session.rules.list_legal_actions(session.world, CrownMatch.HUMAN_ID):
 		if str(action.get("type", "")) == "offer_vassal":
+			session.submit(action)
+			hud.refresh()
+			map_view.queue_redraw()
+			return
+
+
+func _on_found_corp() -> void:
+	_submit_first("found_corporation")
+
+
+func _on_spread_corp() -> void:
+	_submit_first("spread_corporation")
+
+
+func _on_scout() -> void:
+	if session == null or session.world.game_over:
+		return
+	for action in session.rules.list_legal_actions(session.world, CrownMatch.HUMAN_ID):
+		if str(action.get("type", "")) in ["scout_city", "reveal_tile"]:
+			session.submit(action)
+			hud.refresh()
+			map_view.queue_redraw()
+			return
+
+
+func _on_steal_tech() -> void:
+	_submit_first("steal_tech")
+
+
+func _on_foment() -> void:
+	_submit_first("foment")
+
+
+func _submit_first(action_type: String) -> void:
+	if session == null or session.world.game_over:
+		return
+	for action in session.rules.list_legal_actions(session.world, CrownMatch.HUMAN_ID):
+		if str(action.get("type", "")) == action_type:
 			session.submit(action)
 			hud.refresh()
 			map_view.queue_redraw()

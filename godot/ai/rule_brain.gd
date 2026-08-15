@@ -27,6 +27,10 @@ extends AiBrain
 ##     cities are training hosts.
 ## 13. Offer the yoke to a weaker rival that still has 2+ cities if this
 ##     host is not already a turn from domination; otherwise finish them.
+## 14. Found a charter when eligible; spread to cities that would profit.
+##     Do not found a second charter if food is already thin.
+## 15. Espionage: scout if no rival city is visible; steal a useful craft;
+##     otherwise foment a city before an assault. Save points if none apply.
 
 
 func compute_actions(state: Dictionary) -> Array:
@@ -96,6 +100,13 @@ func compute_actions(state: Dictionary) -> Array:
 
 	for action in _pick_specialists(state, legal):
 		chosen.append(action)
+
+	for action in _pick_corporations(state, legal):
+		chosen.append(action)
+
+	var spy := _pick_espionage(state, legal)
+	if not spy.is_empty():
+		chosen.append(spy)
 
 	chosen.append({"type": "end_turn"})
 	return chosen
@@ -227,6 +238,67 @@ func _pick_specialists(state: Dictionary, legal: Array) -> Array:
 		out.append(action)
 		assigned[city_id] = true
 	return out
+
+
+func _pick_corporations(state: Dictionary, legal: Array) -> Array:
+	var out: Array = []
+	var owned: Array = state.get("hooks", {}).get("corporations", [])
+	var food_ok := _food_can_bear_charter(state)
+	if owned.size() < 1 or food_ok:
+		var founds := _of_type(legal, "found_corporation")
+		if not founds.is_empty() and (owned.is_empty() or food_ok):
+			if owned.size() < 2:
+				out.append(founds[0])
+	for action in _of_type(legal, "spread_corporation"):
+		var dest := _city(state, int(action.get("city_id", -1)))
+		if dest.is_empty():
+			continue
+		if int(action.get("gold_cost", 0)) > 0 and not _city_has_corp_resource(state, dest, str(action.get("corp_id", ""))):
+			if int(state.get("economy", {}).get("gold", 0)) < 8:
+				continue
+		out.append(action)
+	return out
+
+
+func _food_can_bear_charter(state: Dictionary) -> bool:
+	for city in _own_cities(state):
+		var yld: Dictionary = city.get("yields", {})
+		if int(yld.get("food", 2)) <= 2:
+			return false
+	return not _own_cities(state).is_empty()
+
+
+func _city_has_corp_resource(state: Dictionary, city: Dictionary, corp_id: String) -> bool:
+	var res := Defs.corp_resource(corp_id)
+	if res == "":
+		return false
+	var cx := int(city.get("x", 0))
+	var cy := int(city.get("y", 0))
+	for tile in state.get("tiles", []):
+		if maxi(absi(int(tile.get("x", 0)) - cx), absi(int(tile.get("y", 0)) - cy)) > 1:
+			continue
+		if str(tile.get("resource", "")) == res:
+			return true
+	return false
+
+
+func _pick_espionage(state: Dictionary, legal: Array) -> Dictionary:
+	if _own_cities(state).is_empty():
+		return {}
+	if _nearest_rival_city(state).is_empty():
+		var scouts := _of_type(legal, "scout_city")
+		if not scouts.is_empty():
+			return scouts[0]
+	for preferred in Defs.TECH_ORDER:
+		for action in _of_type(legal, "steal_tech"):
+			if str(action.get("tech_id", "")) == preferred:
+				return action
+	if _war_plan(state):
+		var target := _nearest_rival_city(state)
+		for action in _of_type(legal, "foment"):
+			if target.is_empty() or int(action.get("city_id", -1)) == int(target.get("id", -1)):
+				return action
+	return {}
 
 
 func _pick_research(state: Dictionary, legal: Array) -> Dictionary:

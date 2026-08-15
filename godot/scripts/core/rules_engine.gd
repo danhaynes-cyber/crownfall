@@ -38,6 +38,18 @@ func apply(world: GameWorld, action: Dictionary) -> Dictionary:
 			result = _assign_specialist(world, action)
 		"offer_vassal":
 			result = _offer_vassal(world, action)
+		"found_corporation":
+			result = _found_corporation(world, action)
+		"spread_corporation":
+			result = _spread_corporation(world, action)
+		"scout_city":
+			result = _scout_city(world, action)
+		"reveal_tile":
+			result = _reveal_tile(world, action)
+		"steal_tech":
+			result = _steal_tech(world, action)
+		"foment":
+			result = _foment(world, action)
 		"end_turn":
 			result = {"ok": true, "ended": true, "message": ""}
 		_:
@@ -184,6 +196,8 @@ func list_legal_actions(world: GameWorld, player_id: int) -> Array:
 				var other: GameWorld.Player = other_variant
 				if _can_offer_vassal(world, researcher, other.id):
 					actions.append({"type": "offer_vassal", "player_id": other.id})
+		_list_corporation_actions(world, researcher, actions)
+		_list_espionage_actions(world, researcher, actions)
 	actions.append({"type": "end_turn"})
 	return actions
 
@@ -242,6 +256,11 @@ func process_economy(world: GameWorld, player_id: int) -> PackedStringArray:
 		player.anarchy_turns -= 1
 		if player.anarchy_turns == 0:
 			notes.append("%s leaves anarchy." % player.display_name)
+	for other_variant in world.players:
+		var other: GameWorld.Player = other_variant
+		if other.id == player_id:
+			continue
+		world.add_spy_points(player, other.id, Defs.SPY_INCOME)
 	_progress_research(world, player, notes)
 	var old_radius: Dictionary = {}
 	for city_variant in world.cities_of(player_id):
@@ -258,6 +277,7 @@ func process_economy(world: GameWorld, player_id: int) -> PackedStringArray:
 
 
 func refresh_moves(world: GameWorld, player_id: int) -> void:
+	world.clear_spy_visible(player_id)
 	for unit_variant in world.units_of(player_id):
 		var unit: GameWorld.Unit = unit_variant
 		unit.moves_left = unit.max_moves
@@ -720,6 +740,273 @@ func _offer_vassal(world: GameWorld, action: Dictionary) -> Dictionary:
 		vassal.display_name if vassal else "A host",
 		liege.display_name,
 	])
+
+
+func _list_corporation_actions(world: GameWorld, player: GameWorld.Player, actions: Array) -> void:
+	if player == null:
+		return
+	for corp_id in Defs.CORP_ORDER:
+		if world.is_corp_founded(corp_id):
+			continue
+		if not Defs.has_tech(player.researched, Defs.corp_required_tech(corp_id)):
+			continue
+		var resource := Defs.corp_resource(corp_id)
+		for city_variant in world.cities_of(player.id):
+			var city: GameWorld.City = city_variant
+			if world.city_works_resource(city, resource):
+				actions.append({
+					"type": "found_corporation",
+					"corp_id": corp_id,
+					"city_id": city.id,
+				})
+				break
+	for corp_id in world.founded_corp_ids():
+		var entry: Dictionary = world.corp_entry(str(corp_id))
+		if int(entry.get("founder_id", -1)) != player.id:
+			continue
+		var hq := world.get_city(int(entry.get("hq_city_id", -1)))
+		for city_variant in world.cities_of(player.id):
+			var dest: GameWorld.City = city_variant
+			if dest.corporations.has(corp_id):
+				continue
+			var connected: bool = hq != null and world.cities_road_connected(hq, dest)
+			var has_res: bool = world.city_has_resource(dest, Defs.corp_resource(str(corp_id)))
+			if connected and has_res:
+				actions.append({
+					"type": "spread_corporation",
+					"corp_id": corp_id,
+					"city_id": dest.id,
+					"gold_cost": 0,
+				})
+			elif player.gold >= Defs.CORP_SPREAD_GOLD:
+				actions.append({
+					"type": "spread_corporation",
+					"corp_id": corp_id,
+					"city_id": dest.id,
+					"gold_cost": Defs.CORP_SPREAD_GOLD,
+				})
+
+
+func _list_espionage_actions(world: GameWorld, player: GameWorld.Player, actions: Array) -> void:
+	if player == null:
+		return
+	for other_variant in world.players:
+		var other: GameWorld.Player = other_variant
+		if other.id == player.id:
+			continue
+		var points: int = world.spy_points_against(player, other.id)
+		if points >= Defs.SPY_SCOUT_COST and not world.cities_of(other.id).is_empty():
+			actions.append({
+				"type": "scout_city",
+				"player_id": other.id,
+				"cost": Defs.SPY_SCOUT_COST,
+			})
+		if points >= Defs.SPY_STEAL_COST:
+			for tech_id in Defs.TECH_ORDER:
+				if player.researched.has(tech_id):
+					continue
+				if other.researched.has(tech_id):
+					actions.append({
+						"type": "steal_tech",
+						"player_id": other.id,
+						"tech_id": tech_id,
+						"cost": Defs.SPY_STEAL_COST,
+					})
+		if points >= Defs.SPY_FOMENT_COST:
+			for city_variant in world.cities_of(other.id):
+				var city: GameWorld.City = city_variant
+				if world.is_visible(player.id, city.x, city.y):
+					actions.append({
+						"type": "foment",
+						"city_id": city.id,
+						"cost": Defs.SPY_FOMENT_COST,
+					})
+	var reveal_added := 0
+	for unit_variant in world.units_of(player.id):
+			var unit: GameWorld.Unit = unit_variant
+			for d in Defs.DIRS:
+				var nx: int = unit.x + d.x
+				var ny: int = unit.y + d.y
+				if not world.in_bounds(nx, ny) or world.is_visible(player.id, nx, ny):
+					continue
+				var charge_id := _reveal_charge_rival(world, player.id, nx, ny)
+				if world.spy_points_against(player, charge_id) < Defs.SPY_REVEAL_COST:
+					continue
+				actions.append({
+					"type": "reveal_tile",
+					"tile": {"x": nx, "y": ny},
+					"player_id": charge_id,
+					"cost": Defs.SPY_REVEAL_COST,
+				})
+				reveal_added += 1
+				if reveal_added >= 8:
+					break
+		if reveal_added >= 8:
+			break
+
+
+func _reveal_charge_rival(world: GameWorld, viewer_id: int, x: int, y: int) -> int:
+	var tile := world.tile_at(x, y)
+	if tile != null and tile.culture_owner_id > 0 and tile.culture_owner_id != viewer_id:
+		return tile.culture_owner_id
+	var occupant := world.unit_at(x, y)
+	if occupant != null and occupant.owner_id != viewer_id:
+		return occupant.owner_id
+	var city := world.city_at(x, y)
+	if city != null and city.owner_id != viewer_id:
+		return city.owner_id
+	for other_variant in world.players:
+		var other: GameWorld.Player = other_variant
+		if other.id != viewer_id:
+			return other.id
+	return -1
+
+
+func _found_corporation(world: GameWorld, action: Dictionary) -> Dictionary:
+	var player := world.get_player(world.current_player_id)
+	if player == null:
+		return _fail("unknown_player")
+	var corp_id := str(action.get("corp_id", ""))
+	if not Defs.CORPORATIONS.has(corp_id):
+		return _fail("unknown_corporation")
+	if world.is_corp_founded(corp_id):
+		return _fail("already_founded")
+	if not Defs.has_tech(player.researched, Defs.corp_required_tech(corp_id)):
+		return _fail("tech_locked")
+	var city := world.get_city(int(action.get("city_id", -1)))
+	if city == null or city.owner_id != player.id:
+		for city_variant in world.cities_of(player.id):
+			var candidate: GameWorld.City = city_variant
+			if world.city_works_resource(candidate, Defs.corp_resource(corp_id)):
+				city = candidate
+				break
+	if city == null or city.owner_id != player.id:
+		return _fail("no_eligible_city")
+	if not world.city_works_resource(city, Defs.corp_resource(corp_id)):
+		return _fail("missing_resource")
+	world.founded_corporations.append({
+		"id": corp_id,
+		"founder_id": player.id,
+		"hq_city_id": city.id,
+	})
+	if not player.corporation_ids.has(corp_id):
+		player.corporation_ids.append(corp_id)
+	if not city.corporations.has(corp_id):
+		city.corporations.append(corp_id)
+	return _ok("%s founded the %s in %s." % [player.display_name, Defs.corp_name(corp_id), city.name])
+
+
+func _spread_corporation(world: GameWorld, action: Dictionary) -> Dictionary:
+	var player := world.get_player(world.current_player_id)
+	if player == null:
+		return _fail("unknown_player")
+	var corp_id := str(action.get("corp_id", ""))
+	var entry: Dictionary = world.corp_entry(corp_id)
+	if entry.is_empty():
+		return _fail("unknown_corporation")
+	if int(entry.get("founder_id", -1)) != player.id:
+		return _fail("not_your_charter")
+	var dest := world.get_city(int(action.get("city_id", -1)))
+	if dest == null or dest.owner_id != player.id:
+		return _fail("not_your_city")
+	if dest.corporations.has(corp_id):
+		return _fail("already_present")
+	var hq := world.get_city(int(entry.get("hq_city_id", -1)))
+	var connected: bool = hq != null and world.cities_road_connected(hq, dest)
+	var has_res: bool = world.city_has_resource(dest, Defs.corp_resource(corp_id))
+	var cost := 0
+	if not (connected and has_res):
+		cost = Defs.CORP_SPREAD_GOLD
+		if player.gold < cost:
+			return _fail("cannot_spread")
+		player.gold -= cost
+	dest.corporations.append(corp_id)
+	if cost > 0:
+		return _ok("The %s reached %s for %d gold." % [Defs.corp_name(corp_id), dest.name, cost])
+	return _ok("The %s reached %s along the road." % [Defs.corp_name(corp_id), dest.name])
+
+
+func _scout_city(world: GameWorld, action: Dictionary) -> Dictionary:
+	var player := world.get_player(world.current_player_id)
+	if player == null:
+		return _fail("unknown_player")
+	var rival_id := int(action.get("player_id", -1))
+	if rival_id == player.id or world.get_player(rival_id) == null:
+		return _fail("unknown_rival")
+	if not world.spend_spy_points(player, rival_id, Defs.SPY_SCOUT_COST):
+		return _fail("not_enough_espionage")
+	var revealed := 0
+	for city_variant in world.cities_of(rival_id):
+		var city: GameWorld.City = city_variant
+		for y in range(city.y - 1, city.y + 2):
+			for x in range(city.x - 1, city.x + 2):
+				if world.in_bounds(x, y):
+					world.spy_reveal(player.id, x, y)
+					revealed += 1
+	var rival := world.get_player(rival_id)
+	return _ok("%s pierced the fog over %s (%d tiles)." % [
+		player.short_name,
+		rival.short_name if rival else "a rival",
+		revealed,
+	])
+
+
+func _reveal_tile(world: GameWorld, action: Dictionary) -> Dictionary:
+	var player := world.get_player(world.current_player_id)
+	if player == null:
+		return _fail("unknown_player")
+	var tile: Dictionary = action.get("tile", {})
+	var x := int(tile.get("x", -1))
+	var y := int(tile.get("y", -1))
+	if not world.in_bounds(x, y):
+		return _fail("out_of_bounds")
+	var rival_id := int(action.get("player_id", -1))
+	if rival_id <= 0:
+		rival_id = _reveal_charge_rival(world, player.id, x, y)
+	if not world.spend_spy_points(player, rival_id, Defs.SPY_REVEAL_COST):
+		return _fail("not_enough_espionage")
+	world.spy_reveal(player.id, x, y)
+	return _ok("%s unveiled the tile at %d,%d." % [player.short_name, x, y])
+
+
+func _steal_tech(world: GameWorld, action: Dictionary) -> Dictionary:
+	var player := world.get_player(world.current_player_id)
+	if player == null:
+		return _fail("unknown_player")
+	var rival_id := int(action.get("player_id", -1))
+	var rival := world.get_player(rival_id)
+	if rival == null or rival_id == player.id:
+		return _fail("unknown_rival")
+	var tech_id := str(action.get("tech_id", ""))
+	if not Defs.TECHS.has(tech_id):
+		return _fail("unknown_tech")
+	if player.researched.has(tech_id):
+		return _fail("already_researched")
+	if not rival.researched.has(tech_id):
+		return _fail("rival_lacks_tech")
+	if not world.spend_spy_points(player, rival_id, Defs.SPY_STEAL_COST):
+		return _fail("not_enough_espionage")
+	player.researched.append(tech_id)
+	if player.researching == tech_id:
+		player.researching = ""
+		player.research_progress = 0
+	return _ok("%s stole %s from %s." % [player.display_name, Defs.tech_name(tech_id), rival.short_name])
+
+
+func _foment(world: GameWorld, action: Dictionary) -> Dictionary:
+	var player := world.get_player(world.current_player_id)
+	if player == null:
+		return _fail("unknown_player")
+	var city := world.get_city(int(action.get("city_id", -1)))
+	if city == null or city.owner_id == player.id:
+		return _fail("unknown_city")
+	if not world.is_visible(player.id, city.x, city.y):
+		return _fail("not_visible")
+	if not world.spend_spy_points(player, city.owner_id, Defs.SPY_FOMENT_COST):
+		return _fail("not_enough_espionage")
+	city.stored_production = maxi(0, city.stored_production - Defs.SPY_FOMENT_PRODUCTION)
+	city.culture_total = maxi(0, city.culture_total - Defs.SPY_FOMENT_CULTURE)
+	return _ok("%s fomented unrest in %s." % [player.short_name, city.name])
 
 
 func evaluate_victory(world: GameWorld) -> void:

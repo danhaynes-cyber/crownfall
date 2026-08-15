@@ -12,6 +12,11 @@ signal adopt_religion_pressed
 signal civic_pressed(category: String, civic_id: String)
 signal specialist_pressed(kind: String)
 signal vassal_pressed
+signal found_corp_pressed
+signal spread_corp_pressed
+signal scout_pressed
+signal steal_tech_pressed
+signal foment_pressed
 signal save_pressed
 signal title_pressed
 
@@ -37,6 +42,11 @@ var _civic_btns: Dictionary = {}
 var _chronicler: Button
 var _wright: Button
 var _vassal: Button
+var _found_corp: Button
+var _spread_corp: Button
+var _scout: Button
+var _steal: Button
+var _foment: Button
 var _save: Button
 var _end: Button
 var _help: Label
@@ -132,17 +142,27 @@ func _ready() -> void:
 	_wright = _add_btn(side_panel, "Assign Wright", y, func(): specialist_pressed.emit("wright"))
 	y += 22
 	_vassal = _add_btn(side_panel, "Offer the Yoke", y, func(): vassal_pressed.emit())
-	y += 22
+	y += 20
+	_found_corp = _add_btn(side_panel, "Found Charter", y, func(): found_corp_pressed.emit())
+	y += 20
+	_spread_corp = _add_btn(side_panel, "Spread Charter", y, func(): spread_corp_pressed.emit())
+	y += 20
+	_scout = _add_btn(side_panel, "Scout Rival", y, func(): scout_pressed.emit())
+	y += 20
+	_steal = _add_btn(side_panel, "Steal a Craft", y, func(): steal_tech_pressed.emit())
+	y += 20
+	_foment = _add_btn(side_panel, "Foment Unrest", y, func(): foment_pressed.emit())
+	y += 20
 	_save = _add_btn(side_panel, "Save Chronicle", y, func(): save_pressed.emit())
-	y += 24
+	y += 22
 
 	_help = Label.new()
 	_help.position = Vector2(12, y + 2)
-	_help.size = Vector2(280, 70)
+	_help.size = Vector2(280, 56)
 	_help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_help.add_theme_color_override("font_color", Color(0.78, 0.72, 0.60))
 	_help.add_theme_font_size_override("font_size", 11)
-	_help.text = "Civics: first adopt is free; a switch costs one turn of anarchy. Specialists need pop 2+. Offer the yoke when you hold more cities than a rival."
+	_help.text = "Charters need a worked resource. Spy points accrue each turn: scout, steal a craft, or foment a visible city."
 	side_panel.add_child(_help)
 
 	_end = Button.new()
@@ -224,6 +244,16 @@ func refresh() -> void:
 			_wright.disabled = true
 		if _vassal:
 			_vassal.disabled = true
+		if _found_corp:
+			_found_corp.disabled = true
+		if _spread_corp:
+			_spread_corp.disabled = true
+		if _scout:
+			_scout.disabled = true
+		if _steal:
+			_steal.disabled = true
+		if _foment:
+			_foment.disabled = true
 		if _save:
 			_save.disabled = true
 		_end.disabled = true
@@ -282,6 +312,11 @@ func refresh() -> void:
 	var can_found_faith := false
 	var can_adopt := false
 	var can_vassal := false
+	var can_found_corp := false
+	var can_spread_corp := false
+	var can_scout := false
+	var can_steal := false
+	var can_foment := false
 	var legal_civics: Dictionary = {}
 	var legal_specs: Dictionary = {}
 	if session.rules and my_turn:
@@ -293,6 +328,16 @@ func refresh() -> void:
 				can_adopt = true
 			elif kind == "offer_vassal":
 				can_vassal = true
+			elif kind == "found_corporation":
+				can_found_corp = true
+			elif kind == "spread_corporation":
+				can_spread_corp = true
+			elif kind == "scout_city" or kind == "reveal_tile":
+				can_scout = true
+			elif kind == "steal_tech":
+				can_steal = true
+			elif kind == "foment":
+				can_foment = true
 			elif kind == "adopt_civic":
 				legal_civics[str(action.get("civic_id", ""))] = true
 			elif kind == "assign_specialist":
@@ -311,6 +356,16 @@ func refresh() -> void:
 		_wright.disabled = not my_turn or not bool(legal_specs.get("wright", false))
 	if _vassal:
 		_vassal.disabled = not my_turn or not can_vassal
+	if _found_corp:
+		_found_corp.disabled = not my_turn or not can_found_corp
+	if _spread_corp:
+		_spread_corp.disabled = not my_turn or not can_spread_corp
+	if _scout:
+		_scout.disabled = not my_turn or not can_scout
+	if _steal:
+		_steal.disabled = not my_turn or not can_steal
+	if _foment:
+		_foment.disabled = not my_turn or not can_foment
 	if _save:
 		_save.disabled = false
 	for tech_id in _research_btns.keys():
@@ -337,6 +392,16 @@ func refresh() -> void:
 			_wright.disabled = true
 		if _vassal:
 			_vassal.disabled = true
+		if _found_corp:
+			_found_corp.disabled = true
+		if _spread_corp:
+			_spread_corp.disabled = true
+		if _scout:
+			_scout.disabled = true
+		if _steal:
+			_steal.disabled = true
+		if _foment:
+			_foment.disabled = true
 	_log.clear()
 	var start := maxi(0, world.event_log.size() - 8)
 	for i in range(start, world.event_log.size()):
@@ -390,13 +455,19 @@ func _side_text(world: GameWorld) -> String:
 				spec_bits.append("%d %s" % [n, Defs.specialist_name(kind)])
 		if not spec_bits.is_empty():
 			specs = ", ".join(spec_bits)
-		bits.append("[b]%s[/b]\nPop %d  Food %d  Prod %d/%s\nYield F%d P%d G%d  Sci %d  Cul %d\nCulture %d  Border %d\nDefense %d  Garrison %d\nFaiths: %s\nSpecialists: %s\n" % [
+		var corps := "none"
+		if not city.corporations.is_empty():
+			var corp_names: PackedStringArray = PackedStringArray()
+			for corp_id in city.corporations:
+				corp_names.append(Defs.corp_name(str(corp_id)))
+			corps = ", ".join(corp_names)
+		bits.append("[b]%s[/b]\nPop %d  Food %d  Prod %d/%s\nYield F%d P%d G%d  Sci %d  Cul %d\nCulture %d  Border %d\nDefense %d  Garrison %d\nFaiths: %s\nSpecialists: %s\nCharters: %s\n" % [
 			city.name, city.population, city.stored_food, city.stored_production, prod,
 			int(yld.get("food", 0)), int(yld.get("production", 0)), int(yld.get("gold", 0)),
 			int(yld.get("science", 0)), int(yld.get("culture", 0)),
 			city.culture_total, city.border_radius,
 			world.city_defense(city), world.garrison_count(city),
-			faiths, specs,
+			faiths, specs, corps,
 		])
 	var human := session.human() if session else null
 	if human and human.state_religion != "":
@@ -411,6 +482,20 @@ func _side_text(world: GameWorld) -> String:
 		bits.append("Vassal of %s\n" % (liege.display_name if liege else "a host"))
 	elif human and not human.vassal_ids.is_empty():
 		bits.append("Vassals: %d\n" % human.vassal_ids.size())
+	if human and not human.corporation_ids.is_empty():
+		var charter_bits: PackedStringArray = PackedStringArray()
+		for corp_id in human.corporation_ids:
+			charter_bits.append(Defs.corp_name(str(corp_id)))
+		bits.append("Charters: %s\n" % ", ".join(charter_bits))
+	if human:
+		var spy_bits: PackedStringArray = PackedStringArray()
+		for other_variant in world.players:
+			var other: GameWorld.Player = other_variant
+			if other.id == human.id:
+				continue
+			spy_bits.append("%s %d" % [other.short_name, human.espionage_points.get(Defs.spy_key(other.id), 0)])
+		if not spy_bits.is_empty():
+			bits.append("Spy: %s\n" % ", ".join(spy_bits))
 	if bits.is_empty():
 		bits.append("[b]The field[/b]\nSelect a unit or city.\nWASD or arrows to pan.\nWheel to zoom. Right-drag to look.")
 	return "\n".join(bits)

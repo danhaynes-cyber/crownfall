@@ -86,6 +86,36 @@ const SPECIALIST_ORDER: Array[String] = ["chronicler", "wright"]
 const VASSAL_TRIBUTE_NUM := 1
 const VASSAL_TRIBUTE_DEN := 2
 
+const CORPORATIONS := {
+	"veinwright": {
+		"name": "Veinwright Charter",
+		"resource": "ore",
+		"requires_tech": "delving",
+		"gold": 2,
+		"production": 1,
+		"upkeep_food": 1,
+	},
+	"sheafhall": {
+		"name": "Sheafhall League",
+		"resource": "grain",
+		"requires_tech": "",
+		"gold": 2,
+		"production": 0,
+		"upkeep_food": 1,
+	},
+}
+
+const CORP_ORDER: Array[String] = ["veinwright", "sheafhall"]
+const CORP_SPREAD_GOLD := 4
+
+const SPY_INCOME := 2
+const SPY_SCOUT_COST := 4
+const SPY_REVEAL_COST := 3
+const SPY_STEAL_COST := 10
+const SPY_FOMENT_COST := 5
+const SPY_FOMENT_PRODUCTION := 4
+const SPY_FOMENT_CULTURE := 2
+
 const CITY_NAME_POOLS := {
 	1: ["Rivermark", "Oakhold", "Goldensill", "Thornwatch", "Dawnmere", "Hartford"],
 	2: ["Embercairn", "Nightwell", "Ashfen", "Gloamrest", "Vesperhold", "Duskbarrow"],
@@ -282,6 +312,26 @@ static func specialist_name(kind: String) -> String:
 
 static func specialist_slot_max(population: int) -> int:
 	return maxi(0, population - 1)
+
+
+static func corp_info(corp_id: String) -> Dictionary:
+	return CORPORATIONS.get(corp_id, {})
+
+
+static func corp_name(corp_id: String) -> String:
+	return str(corp_info(corp_id).get("name", corp_id))
+
+
+static func corp_resource(corp_id: String) -> String:
+	return str(corp_info(corp_id).get("resource", ""))
+
+
+static func corp_required_tech(corp_id: String) -> String:
+	return str(corp_info(corp_id).get("requires_tech", ""))
+
+
+static func spy_key(player_id: int) -> String:
+	return str(player_id)
 
 
 static func unit_letter(unit_type: String) -> String:

@@ -37,10 +37,11 @@ func _run(failures: PackedStringArray) -> void:
 	_expect(failures, rivers > 0, "river overlay present")
 
 	var snap := session.snapshot_for(1)
-	for key in ["protocol_version", "tiles", "units", "cities", "resources", "scores", "legal_actions", "economy", "hooks", "techs", "faiths", "civics", "game_over", "winner_id", "victory_kind", "victory_scores"]:
+	for key in ["protocol_version", "tiles", "units", "cities", "resources", "scores", "legal_actions", "economy", "hooks", "techs", "faiths", "civics", "corporations", "espionage", "game_over", "winner_id", "victory_kind", "victory_scores"]:
 		_expect(failures, snap.has(key), "snapshot has %s" % key)
 	_expect(failures, snap["hooks"].has("state_religion"), "hooks.state_religion present")
 	_expect(failures, snap["hooks"].has("civics") and snap["hooks"].has("vassal_of") and snap["hooks"].has("vassals"), "hooks civics and vassals present")
+	_expect(failures, snap["hooks"].has("corporations") and snap["hooks"].has("espionage_points"), "hooks corporations and espionage_points present")
 	_expect(failures, bool(snap.get("game_over", true)) == false, "new match is not over")
 	_expect(failures, snap["legal_actions"] is Array and snap["legal_actions"].size() > 0, "legal actions listed")
 	_expect(failures, snap["hooks"].has("civics"), "civics hook")
@@ -119,6 +120,7 @@ func _run(failures: PackedStringArray) -> void:
 	_test_capture_faith_victory_save(failures)
 	_test_rulebrain_city_and_faith(failures)
 	_test_civics_specialists_vassals(failures)
+	_test_corporations_espionage(failures)
 
 
 func _test_culture_expands(failures: PackedStringArray, session: CrownMatch, city: GameWorld.City) -> void:
@@ -622,6 +624,118 @@ func _test_civics_specialists_vassals(failures: PackedStringArray) -> void:
 	_expect(failures, civic_picks.size() <= 2, "RuleBrain adopts at most one civic per category")
 
 
+func _test_corporations_espionage(failures: PackedStringArray) -> void:
+	var session := CrownMatch.new()
+	session.new_game(20260815, false)
+	var hq_site := _first_land(session.world, 5, 5)
+	var branch_site := _land_away(session.world, hq_site.x, hq_site.y, Defs.CITY_MIN_DISTANCE)
+	var rival_site := _land_away_from(session.world, [hq_site, branch_site], Defs.CITY_MIN_DISTANCE)
+	for unit_variant in session.world.units.duplicate():
+		session.world.remove_unit(unit_variant)
+	var hq: GameWorld.City = session.world.add_city(1, hq_site.x, hq_site.y, "Goldensill")
+	var branch: GameWorld.City = session.world.add_city(1, branch_site.x, branch_site.y, "Oakhold")
+	var rival_city: GameWorld.City = session.world.add_city(2, rival_site.x, rival_site.y, "Embercairn")
+	session.world.current_player_id = 1
+	var grain := _land_near(session.world, hq.x, hq.y, 1)
+	var grain_tile: GameWorld.Tile = session.world.tile_at(grain.x, grain.y)
+	grain_tile.terrain = "grass"
+	grain_tile.resource = "grain"
+	session.world.recompute_culture_borders()
+	_expect(failures, session.world.assign_work_tile(hq, grain.x, grain.y), "HQ works a grain tile")
+	_expect(failures, session.world.city_works_resource(hq, "grain"), "city_works_resource grain")
+	var yld_before: Dictionary = session.world.city_yields(hq)
+	var food_before: int = int(yld_before.get("food", 0))
+	var gold_before: int = int(yld_before.get("gold", 0))
+	var legal: Array = session.rules.list_legal_actions(session.world, 1)
+	var can_found := false
+	for action in legal:
+		if str(action.get("type", "")) == "found_corporation" and str(action.get("corp_id", "")) == "sheafhall":
+			can_found = true
+	_expect(failures, can_found, "found_corporation sheafhall is legal when working grain")
+	var founded := session.submit({"type": "found_corporation", "corp_id": "sheafhall", "city_id": hq.id})
+	_expect(failures, bool(founded.get("ok", false)), "found Sheafhall: %s" % str(founded.get("error", founded.get("message", ""))))
+	_expect(failures, hq.corporations.has("sheafhall"), "HQ lists Sheafhall")
+	_expect(failures, session.human().corporation_ids.has("sheafhall"), "founder stores the charter")
+	_expect(failures, session.world.is_corp_founded("sheafhall"), "world records the charter")
+	var yld_after: Dictionary = session.world.city_yields(hq)
+	_expect(failures, int(yld_after.get("food", 0)) == food_before - 1, "charter upkeep costs 1 food")
+	_expect(failures, int(yld_after.get("gold", 0)) >= gold_before + 2, "Sheafhall pays gold on worked grain")
+	session.human().gold = 10
+	var spread := session.submit({"type": "spread_corporation", "corp_id": "sheafhall", "city_id": branch.id})
+	_expect(failures, bool(spread.get("ok", false)), "spread Sheafhall: %s" % str(spread.get("error", spread.get("message", ""))))
+	_expect(failures, branch.corporations.has("sheafhall"), "branch city received the charter")
+	_expect(failures, int(session.world.city_yields(branch).get("food", 0)) >= 0, "spread city still has a food yield")
+	var snap := session.snapshot_for(1)
+	_expect(failures, snap.has("corporations") and snap.has("espionage"), "snapshot has corporations and espionage")
+	_expect(failures, snap.get("hooks", {}).get("corporations", []).has("sheafhall"), "hooks.corporations is live")
+	_expect(failures, snap.get("corporations", {}).get("yours", []).has("sheafhall"), "corporations.yours lists Sheafhall")
+	var saw_city_corp := false
+	for entry in snap.get("cities", []):
+		if int(entry.get("id", -1)) == hq.id and entry.get("corporations", []).has("sheafhall"):
+			saw_city_corp = true
+	_expect(failures, saw_city_corp, "city.corporations is live in the snapshot")
+
+	var rival: GameWorld.Player = session.world.get_player(2)
+	rival.researched = ["delving"]
+	session.human().espionage_points[Defs.spy_key(2)] = 20
+	session.world.recompute_visibility(1)
+	var hidden := not session.world.is_visible(1, rival_city.x, rival_city.y)
+	if not hidden:
+		for y in session.world.height:
+			for x in session.world.width:
+				session.world.get_player(1).visible.erase(Defs.tile_key(x, y))
+	_expect(failures, not session.world.is_visible(1, rival_city.x, rival_city.y), "rival city starts hidden for scout")
+	var spy_legal: Array = session.rules.list_legal_actions(session.world, 1)
+	var saw_scout := false
+	var saw_steal := false
+	for action in spy_legal:
+		var kind := str(action.get("type", ""))
+		if kind == "scout_city" and int(action.get("player_id", -1)) == 2:
+			saw_scout = true
+		if kind == "steal_tech" and str(action.get("tech_id", "")) == "delving":
+			saw_steal = true
+	_expect(failures, saw_scout, "scout_city is legal when affordable")
+	_expect(failures, saw_steal, "steal_tech is legal when affordable")
+	var scouted := session.submit({"type": "scout_city", "player_id": 2})
+	_expect(failures, bool(scouted.get("ok", false)), "scout_city applied: %s" % str(scouted.get("error", scouted.get("message", ""))))
+	_expect(failures, session.world.is_visible(1, rival_city.x, rival_city.y), "scout pierces fog over the rival city")
+	_expect(failures, session.world.spy_points_against(session.human(), 2) == 16, "scout spends 4 points")
+	var stolen := session.submit({"type": "steal_tech", "player_id": 2, "tech_id": "delving"})
+	_expect(failures, bool(stolen.get("ok", false)), "steal_tech applied: %s" % str(stolen.get("error", stolen.get("message", ""))))
+	_expect(failures, session.human().researched.has("delving"), "stolen Delving is now known")
+	_expect(failures, session.world.spy_points_against(session.human(), 2) == 6, "steal spends 10 points")
+	session.human().espionage_points[Defs.spy_key(2)] = 8
+	rival_city.stored_production = 9
+	rival_city.culture_total = 6
+	var fomented := session.submit({"type": "foment", "city_id": rival_city.id})
+	_expect(failures, bool(fomented.get("ok", false)), "foment applied: %s" % str(fomented.get("error", fomented.get("message", ""))))
+	_expect(failures, rival_city.stored_production == 5, "foment cuts stored production")
+	_expect(failures, rival_city.culture_total == 4, "foment cuts stored culture")
+	_expect(failures, not session.world.game_over, "corp/spy scenario keeps the rival host alive")
+
+	var brain := CrownMatch.new()
+	brain.new_game(20260815, false)
+	var bsite := _first_land(brain.world, 6, 6)
+	var rsite := _land_away(brain.world, bsite.x, bsite.y, Defs.CITY_MIN_DISTANCE)
+	for unit_variant in brain.world.units.duplicate():
+		brain.world.remove_unit(unit_variant)
+	brain.world.add_city(2, bsite.x, bsite.y, "Vesperhold")
+	var prey: GameWorld.City = brain.world.add_city(1, rsite.x, rsite.y, "Hartford")
+	var ai_player: GameWorld.Player = brain.world.get_player(2)
+	ai_player.espionage_points[Defs.spy_key(1)] = 12
+	brain.world.get_player(1).researched = ["delving"]
+	brain.world.current_player_id = 2
+	brain.world.recompute_visibility(2)
+	if not brain.world.is_visible(2, prey.x, prey.y):
+		brain.world.spy_reveal(2, prey.x, prey.y)
+	var actions: Array = RuleBrain.new().compute_actions(brain.snapshot_for(2))
+	var used_mission := false
+	for action in actions:
+		if str(action.get("type", "")) in ["scout_city", "reveal_tile", "steal_tech", "foment"]:
+			used_mission = true
+	_expect(failures, used_mission, "RuleBrain uses an espionage mission when points are high")
+
+
 func _land_away_from(world: GameWorld, points: Array, min_d: int) -> Vector2i:
 	for ty in world.height:
 		for tx in world.width:
@@ -642,7 +756,7 @@ func _land_away_from(world: GameWorld, points: Array, min_d: int) -> Vector2i:
 func _has_illegal_emit(session: CrownMatch) -> bool:
 	for action in session.last_ai_actions:
 		var kind := str(action.get("type", ""))
-		if kind not in ["move_unit", "attack", "attack_city", "found_city", "set_production", "work_tile", "build_improvement", "build_route", "research", "found_religion", "adopt_religion", "adopt_civic", "assign_specialist", "offer_vassal", "end_turn"]:
+		if kind not in ["move_unit", "attack", "attack_city", "found_city", "set_production", "work_tile", "build_improvement", "build_route", "research", "found_religion", "adopt_religion", "adopt_civic", "assign_specialist", "offer_vassal", "found_corporation", "spread_corporation", "scout_city", "reveal_tile", "steal_tech", "foment", "end_turn"]:
 			return true
 	return false
 

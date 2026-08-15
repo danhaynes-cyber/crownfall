@@ -64,6 +64,19 @@ def choose_actions(state: dict) -> list:
         if action.get("type") == "build_route" and int(action.get("unit_id", -1)) not in used:
             take(action)
     for action in legal:
+        if action.get("type") == "found_corporation" and not any(a.get("type") == "found_corporation" for a in chosen):
+            take(action)
+            break
+    for action in legal:
+        if action.get("type") == "spread_corporation":
+            take(action)
+    for action in legal:
+        if action.get("type") in ("scout_city", "steal_tech", "foment", "reveal_tile") and not any(
+            a.get("type") in ("scout_city", "steal_tech", "foment", "reveal_tile") for a in chosen
+        ):
+            take(action)
+            break
+    for action in legal:
         if action.get("type") == "assign_specialist" and not any(
             a.get("type") == "assign_specialist" and a.get("city_id") == action.get("city_id") for a in chosen
         ):

@@ -57,6 +57,19 @@
     "anarchy_turns": 0,
     "catalog": []
   },
+  "corporations": {
+    "catalog": [
+      { "id": "veinwright", "name": "Veinwright Charter", "resource": "ore", "requires_tech": "delving", "gold": 2, "production": 1, "upkeep_food": 1 },
+      { "id": "sheafhall", "name": "Sheafhall League", "resource": "grain", "requires_tech": "", "gold": 2, "production": 0, "upkeep_food": 1 }
+    ],
+    "founded": [],
+    "yours": []
+  },
+  "espionage": {
+    "points": {},
+    "income_per_rival": 2,
+    "costs": { "scout_city": 4, "reveal_tile": 3, "steal_tech": 10, "foment": 5 }
+  },
   "hooks": {
     "civics": [],
     "anarchy_turns": 0,

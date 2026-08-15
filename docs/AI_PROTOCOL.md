@@ -47,10 +47,10 @@ Apply at most 32 actions per turn. `end_turn` stops the list.
 ## GameState
 
 `protocol_version` stays `1`. New fields are additive: `techs`, `faiths`,
-`civics`, `game_over`, `winner_id`, `victory_kind`, `victory_scores`, richer
-cities (`defense`, `garrison_count`, `religions`, `specialist_slots`,
-`assigned_specialists`), richer scores (`vassal_of`, `vassals`), richer
-`tiles`, and extra actions.
+`civics`, `corporations`, `espionage`, `game_over`, `winner_id`,
+`victory_kind`, `victory_scores`, richer cities (`defense`, `garrison_count`,
+`religions`, `specialist_slots`, `assigned_specialists`, `corporations`),
+richer scores (`vassal_of`, `vassals`), richer `tiles`, and extra actions.
 
 Fog of war is applied for `you`. Hidden tiles are omitted. Enemy units and
 cities appear only when the tile is currently visible.
@@ -117,6 +117,19 @@ cities appear only when the tile is currently visible.
       { "id": "open_craft", "name": "Open Craft", "category": "labor", "blurb": "+2 production, −1 gold per city" }
     ]
   },
+  "corporations": {
+    "catalog": [
+      { "id": "veinwright", "name": "Veinwright Charter", "resource": "ore", "requires_tech": "delving", "gold": 2, "production": 1, "upkeep_food": 1 },
+      { "id": "sheafhall", "name": "Sheafhall League", "resource": "grain", "requires_tech": "", "gold": 2, "production": 0, "upkeep_food": 1 }
+    ],
+    "founded": [{ "id": "sheafhall", "name": "Sheafhall League", "founder_id": 2, "hq_city_id": 1 }],
+    "yours": ["sheafhall"]
+  },
+  "espionage": {
+    "points": { "1": 6 },
+    "income_per_rival": 2,
+    "costs": { "scout_city": 4, "reveal_tile": 3, "steal_tech": 10, "foment": 5 }
+  },
   "game_over": false,
   "winner_id": -1,
   "victory_kind": "",
@@ -127,8 +140,8 @@ cities appear only when the tile is currently visible.
     "civics": ["high_seat", "open_craft"],
     "anarchy_turns": 0,
     "state_religion": "hearthbind",
-    "corporations": [],
-    "espionage_points": {},
+    "corporations": ["sheafhall"],
+    "espionage_points": { "1": 6 },
     "vassal_of": -1,
     "vassals": [],
     "researched": ["delving"]
@@ -149,16 +162,19 @@ cities appear only when the tile is currently visible.
 | `techs` | Researched crafts, current study, and the three-tech catalog. |
 | `faiths` | Catalog, founded faiths with founder ids, and your state faith. |
 | `civics` | Adopted civic ids, anarchy turns, and the four-civic catalog. |
+| `corporations` | Charter catalog, founded HQs, and the charters this host founded. |
+| `espionage` | Your points per rival, income, and mission costs. Does not include a rival's private economy. |
 | `game_over` / `winner_id` / `victory_kind` | Match end. `winner_id` is `-1` on a stalemate. Kinds: `domination`, `score`, `stalemate`. |
 | `victory_scores` | Chronicle totals used for the turn-cap victory. |
 | `legal_actions` | Every action the rules engine would accept right now. Empty after `game_over`. |
-| `hooks` | Live: `civics`, `anarchy_turns`, `state_religion`, `vassal_of`, `vassals`. Corporations and espionage remain reserved. Also mirrors `researched`. |
+| `hooks` | Live: `civics`, `anarchy_turns`, `state_religion`, `vassal_of`, `vassals`, `corporations`, `espionage_points`. Also mirrors `researched`. |
 | `scores[].vassal_of` / `scores[].vassals` | Visible to every brain so a remote host can see the yoke. |
 
-Cities include `defense`, `garrison_count`, `religions`, `culture_total`,
-`border_radius`, `specialist_slots`, and `assigned_specialists`. Cities you
-own also include `stored_food`, `stored_production`, `production_type`,
-`production_cost`, `yields`, and `worked`.
+Cities include `defense`, `garrison_count`, `religions`, `corporations`,
+`culture_total`, `border_radius`, `specialist_slots`, and
+`assigned_specialists`. Cities you own also include `stored_food`,
+`stored_production`, `production_type`, `production_cost`, `yields`, and
+`worked`. Rival cities never include stored food, production, or yields.
 
 **City defense:** `max(1, sum of garrison combat strength)` + 1 if the city
 tile is hills or forest + 1 if `border_radius >= 2`. An `attack_city` wins
@@ -200,6 +216,24 @@ automatic. A vassal keeps remaining cities, cannot attack, and sends half
 of that turn's gold and science to the liege. Liege and vassal are not
 hostile.
 
+**Corporations:** two world-unique charters. `veinwright` (Veinwright
+Charter) needs Delving and a city **working** ore: +2 gold and +1
+production per worked ore tile. `sheafhall` (Sheafhall League) needs a
+city working grain: +2 gold per worked grain tile. Each present charter
+costs 1 food upkeep in that city. `found_corporation` plants the HQ.
+The founder may `spread_corporation` to another of their cities: free
+when a road (or city tiles) connects the HQ and the destination has the
+matching resource in radius 1; otherwise 4 gold.
+
+**Espionage:** each host gains 2 points per rival at end of turn.
+Affordable missions always appear in `legal_actions`:
+`scout_city` (4) reveals a rival's cities and their radius-1 tiles for
+the rest of this turn; `reveal_tile` (3) pierces one fog-edge tile;
+`steal_tech` (10) copies one craft they know and you do not; `foment`
+(5) cuts 4 stored production and 2 culture from a **visible** rival
+city. Spy fog clears when that host's next turn begins. The snapshot
+exposes only your points, costs, and legal missions.
+
 ## Actions
 
 | `type` | Fields | Effect |
@@ -218,6 +252,12 @@ hostile.
 | `adopt_civic` | `category`, `civic_id` | Adopt High Seat / Free Cantons / Tithe / Open Craft. First adopt free; switch = 1 turn anarchy. |
 | `assign_specialist` | `city_id`, `specialist`, `count` | Set chronicler or wright count in a city (capped by slots). |
 | `offer_vassal` | `player_id` | Offer the yoke to a weaker sovereign. Accept is automatic. |
+| `found_corporation` | `corp_id`, `city_id` | Found Veinwright or Sheafhall in an eligible city. HQ stays there. |
+| `spread_corporation` | `corp_id`, `city_id`, `gold_cost?` | Spread your charter to another of your cities. Free on road + resource; else 4 gold. |
+| `scout_city` | `player_id`, `cost?` | Spend 4 points. See that rival's cities this turn. |
+| `reveal_tile` | `tile: {x,y}`, `player_id?`, `cost?` | Spend 3 points. Pierce one hidden tile this turn. |
+| `steal_tech` | `player_id`, `tech_id`, `cost?` | Spend 10 points. Copy one craft they know and you do not. |
+| `foment` | `city_id`, `cost?` | Spend 5 points. Cut stored production and culture in a visible rival city. |
 | `end_turn` | — | Stop this brain's list. |
 
 Units: `settler`, `worker` (laborer), `warrior`, `bowman`.
@@ -238,9 +278,12 @@ Only emit members of `legal_actions`. A later model adapter can mimic this:
 10. Work the best owned adjacent tile.
 11. Adopt civics that match the plan (war → High Seat + Open Craft; expand/faith → Free Cantons + Open Craft; cash → Tithe). Never switch a civic already on the plan.
 12. Assign a chronicler when pushing culture or faith; a wright when training hosts.
-13. Offer the yoke to a weaker rival that still has 2+ cities; otherwise finish the conquest. End turn.
+13. Offer the yoke to a weaker rival that still has 2+ cities; otherwise finish the conquest.
+14. Found a charter when eligible; spread to cities that would profit. Do not found a second charter if food is already thin.
+15. Espionage: scout if no rival city is visible; steal a useful craft; otherwise foment a city before an assault. Save points if none apply. End turn.
 
 ## Later systems
 
-Still reserved, not implemented: corporations, espionage. Culture borders,
-techs, capture, victory, faiths, civics, specialists, and vassals are live.
+No reserved BTS-shaped hooks remain. Culture borders, techs, capture,
+victory, faiths, civics, specialists, vassals, corporations, and
+espionage are live.

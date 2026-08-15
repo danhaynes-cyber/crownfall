@@ -60,6 +60,7 @@ class Player:
 	var state_religion: String = ""
 	var corporation_ids: Array = []
 	var espionage_points: Dictionary = {}
+	var spy_visible: Dictionary = {}
 	var vassal_of: int = -1
 	var vassal_ids: Array = []
 	var researched: Array = []
@@ -81,6 +82,7 @@ var cities: Array = []
 var players: Array = []
 var event_log: PackedStringArray = PackedStringArray()
 var founded_faiths: Array = []
+var founded_corporations: Array = []
 var game_over: bool = false
 var winner_id: int = -1
 var victory_kind: String = ""
@@ -454,6 +456,17 @@ func city_yields(city: City) -> Dictionary:
 		if owner.civic_ids.has("open_craft"):
 			production += 2
 			gold = maxi(0, gold - 1)
+	for corp_id in city.corporations:
+		var info: Dictionary = Defs.corp_info(str(corp_id))
+		if info.is_empty():
+			continue
+		food = maxi(0, food - int(info.get("upkeep_food", 0)))
+		var res := str(info.get("resource", ""))
+		for w in city.worked:
+			var tile := tile_at(w.x, w.y)
+			if tile != null and tile.resource == res:
+				gold += int(info.get("gold", 0))
+				production += int(info.get("production", 0))
 	return {
 		"food": food,
 		"production": maxi(production, 1),
@@ -573,12 +586,121 @@ func _reveal(player: Player, cx: int, cy: int, radius: int) -> void:
 
 func is_explored(player_id: int, x: int, y: int) -> bool:
 	var p := get_player(player_id)
-	return p != null and p.explored.has(Defs.tile_key(x, y))
+	if p == null:
+		return false
+	var key := Defs.tile_key(x, y)
+	return p.explored.has(key) or p.spy_visible.has(key)
 
 
 func is_visible(player_id: int, x: int, y: int) -> bool:
 	var p := get_player(player_id)
-	return p != null and p.visible.has(Defs.tile_key(x, y))
+	if p == null:
+		return false
+	var key := Defs.tile_key(x, y)
+	return p.visible.has(key) or p.spy_visible.has(key)
+
+
+func spy_reveal(player_id: int, x: int, y: int) -> void:
+	var p := get_player(player_id)
+	if p == null or not in_bounds(x, y):
+		return
+	var key := Defs.tile_key(x, y)
+	p.explored[key] = true
+	p.spy_visible[key] = true
+
+
+func clear_spy_visible(player_id: int) -> void:
+	var p := get_player(player_id)
+	if p:
+		p.spy_visible.clear()
+
+
+func spy_points_against(player: Player, rival_id: int) -> int:
+	if player == null:
+		return 0
+	return int(player.espionage_points.get(Defs.spy_key(rival_id), 0))
+
+
+func add_spy_points(player: Player, rival_id: int, amount: int) -> void:
+	if player == null:
+		return
+	var key := Defs.spy_key(rival_id)
+	player.espionage_points[key] = int(player.espionage_points.get(key, 0)) + amount
+
+
+func spend_spy_points(player: Player, rival_id: int, amount: int) -> bool:
+	if spy_points_against(player, rival_id) < amount:
+		return false
+	var key := Defs.spy_key(rival_id)
+	player.espionage_points[key] = int(player.espionage_points.get(key, 0)) - amount
+	return true
+
+
+func city_works_resource(city: City, resource: String) -> bool:
+	if resource == "":
+		return false
+	for w in city.worked:
+		var tile := tile_at(w.x, w.y)
+		if tile != null and tile.resource == resource:
+			return true
+	return false
+
+
+func city_has_resource(city: City, resource: String) -> bool:
+	if resource == "":
+		return false
+	for pos in city_radius_tiles(city):
+		var tile := tile_at(pos.x, pos.y)
+		if tile != null and tile.resource == resource:
+			return true
+	return false
+
+
+func founded_corp_ids() -> Array:
+	var ids: Array = []
+	for entry in founded_corporations:
+		ids.append(str(entry.get("id", "")))
+	return ids
+
+
+func is_corp_founded(corp_id: String) -> bool:
+	return founded_corp_ids().has(corp_id)
+
+
+func corp_entry(corp_id: String) -> Dictionary:
+	for entry in founded_corporations:
+		if str(entry.get("id", "")) == corp_id:
+			return entry
+	return {}
+
+
+func cities_road_connected(a: City, b: City) -> bool:
+	if a == null or b == null:
+		return false
+	if a.id == b.id:
+		return true
+	var start := Vector2i(a.x, a.y)
+	var goal := Vector2i(b.x, b.y)
+	var seen: Dictionary = {start: true}
+	var queue: Array[Vector2i] = [start]
+	var i := 0
+	while i < queue.size():
+		var cur: Vector2i = queue[i]
+		i += 1
+		if cur == goal:
+			return true
+		for d in Defs.DIRS:
+			var nxt: Vector2i = cur + d
+			if not in_bounds(nxt.x, nxt.y) or seen.has(nxt):
+				continue
+			var tile := tile_at(nxt.x, nxt.y)
+			if tile == null or not Defs.is_land(tile.terrain):
+				continue
+			if tile.route != "road" and city_at(nxt.x, nxt.y) == null:
+				continue
+			seen[nxt] = true
+			queue.append(nxt)
+	return false
 
 
 func log_event(text: String) -> void:
@@ -770,6 +892,7 @@ func to_dict() -> Dictionary:
 			"religions": city.religions.duplicate(),
 			"specialist_slots": city.specialist_slots.duplicate(),
 			"assigned_specialists": city.assigned_specialists.duplicate(),
+			"corporations": city.corporations.duplicate(),
 		})
 	var player_rows: Array = []
 	for player_variant in players:
@@ -793,6 +916,9 @@ func to_dict() -> Dictionary:
 			"researching": player.researching,
 			"research_progress": player.research_progress,
 			"ever_founded": player.ever_founded,
+			"corporation_ids": player.corporation_ids.duplicate(),
+			"espionage_points": player.espionage_points.duplicate(),
+			"spy_visible": player.spy_visible.keys(),
 		})
 	return {
 		"protocol_version": Defs.PROTOCOL_VERSION,
@@ -809,6 +935,7 @@ func to_dict() -> Dictionary:
 		"players": player_rows,
 		"event_log": Array(event_log),
 		"founded_faiths": founded_faiths.duplicate(true),
+		"founded_corporations": founded_corporations.duplicate(true),
 		"game_over": game_over,
 		"winner_id": winner_id,
 		"victory_kind": victory_kind,
@@ -828,6 +955,7 @@ func from_dict(data: Dictionary) -> void:
 	victory_kind = str(data.get("victory_kind", ""))
 	rng.seed = seed_value
 	founded_faiths = data.get("founded_faiths", []).duplicate(true)
+	founded_corporations = data.get("founded_corporations", []).duplicate(true)
 	event_log = PackedStringArray()
 	for line in data.get("event_log", []):
 		event_log.append(str(line))
@@ -876,6 +1004,7 @@ func from_dict(data: Dictionary) -> void:
 		city.religions = row.get("religions", []).duplicate()
 		city.specialist_slots = row.get("specialist_slots", {}).duplicate()
 		city.assigned_specialists = row.get("assigned_specialists", {}).duplicate()
+		city.corporations = row.get("corporations", []).duplicate()
 		city.worked.clear()
 		for w in row.get("worked", []):
 			city.worked.append(Vector2i(int(w.get("x", 0)), int(w.get("y", 0))))
@@ -902,9 +1031,14 @@ func from_dict(data: Dictionary) -> void:
 		player.researching = str(row.get("researching", ""))
 		player.research_progress = int(row.get("research_progress", 0))
 		player.ever_founded = bool(row.get("ever_founded", false))
+		player.corporation_ids = row.get("corporation_ids", []).duplicate()
+		player.espionage_points = row.get("espionage_points", {}).duplicate()
 		player.explored.clear()
 		for key in row.get("explored", []):
 			player.explored[str(key)] = true
+		player.spy_visible.clear()
+		for key in row.get("spy_visible", []):
+			player.spy_visible[str(key)] = true
 		players.append(player)
 	for player_variant in players:
 		var player: Player = player_variant

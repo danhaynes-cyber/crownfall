@@ -130,6 +130,8 @@ static func build(world: GameWorld, viewer_id: int, rules: RulesEngine) -> Dicti
 		"techs": _techs(you),
 		"faiths": _faiths(world, you),
 		"civics": _civics(you),
+		"corporations": _corporations(world, you),
+		"espionage": _espionage(you),
 		"game_over": world.game_over,
 		"winner_id": world.winner_id,
 		"victory_kind": world.victory_kind,
@@ -138,12 +140,12 @@ static func build(world: GameWorld, viewer_id: int, rules: RulesEngine) -> Dicti
 			"civics": you.civic_ids.duplicate() if you else [],
 			"anarchy_turns": you.anarchy_turns if you else 0,
 			"state_religion": you.state_religion if you else "",
-			"corporations": you.corporation_ids if you else [],
-			"espionage_points": you.espionage_points if you else {},
+			"corporations": you.corporation_ids.duplicate() if you else [],
+			"espionage_points": you.espionage_points.duplicate() if you else {},
 			"vassal_of": you.vassal_of if you else -1,
 			"vassals": you.vassal_ids.duplicate() if you else [],
 			"researched": you.researched.duplicate() if you else [],
-			"note": "hooks.civics, state_religion, vassal_of, vassals, and city specialists are live. Corporations, espionage, and remaining reserved fields stay empty. Techs are first-class under techs.",
+			"note": "hooks.civics, state_religion, vassal_of, vassals, corporations, espionage_points, and city specialists/corporations are live. Techs are first-class under techs.",
 		},
 	}
 
@@ -205,4 +207,46 @@ static func _civics(you: GameWorld.Player) -> Dictionary:
 		"adopted": you.civic_ids.duplicate() if you else [],
 		"anarchy_turns": you.anarchy_turns if you else 0,
 		"catalog": catalog,
+	}
+
+
+static func _corporations(world: GameWorld, you: GameWorld.Player) -> Dictionary:
+	var catalog: Array = []
+	for corp_id in Defs.CORP_ORDER:
+		var info: Dictionary = Defs.corp_info(corp_id)
+		catalog.append({
+			"id": corp_id,
+			"name": info.get("name", corp_id),
+			"resource": info.get("resource", ""),
+			"requires_tech": info.get("requires_tech", ""),
+			"gold": int(info.get("gold", 0)),
+			"production": int(info.get("production", 0)),
+			"upkeep_food": int(info.get("upkeep_food", 0)),
+		})
+	var founded: Array = []
+	for entry in world.founded_corporations:
+		var corp_id := str(entry.get("id", ""))
+		founded.append({
+			"id": corp_id,
+			"name": Defs.corp_name(corp_id),
+			"founder_id": int(entry.get("founder_id", -1)),
+			"hq_city_id": int(entry.get("hq_city_id", -1)),
+		})
+	return {
+		"catalog": catalog,
+		"founded": founded,
+		"yours": you.corporation_ids.duplicate() if you else [],
+	}
+
+
+static func _espionage(you: GameWorld.Player) -> Dictionary:
+	return {
+		"points": you.espionage_points.duplicate() if you else {},
+		"income_per_rival": Defs.SPY_INCOME,
+		"costs": {
+			"scout_city": Defs.SPY_SCOUT_COST,
+			"reveal_tile": Defs.SPY_REVEAL_COST,
+			"steal_tech": Defs.SPY_STEAL_COST,
+			"foment": Defs.SPY_FOMENT_COST,
+		},
 	}
