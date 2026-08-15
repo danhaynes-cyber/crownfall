@@ -75,9 +75,9 @@ func _build_title() -> void:
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	title.add_child(dim)
 	var box := VBoxContainer.new()
-	box.position = Vector2(80, 160)
-	box.size = Vector2(720, 560)
-	box.add_theme_constant_override("separation", 16)
+	box.position = Vector2(80, 120)
+	box.size = Vector2(720, 640)
+	box.add_theme_constant_override("separation", 14)
 	title.add_child(box)
 	var heading := Label.new()
 	heading.text = "CROWNFALL"
@@ -85,22 +85,16 @@ func _build_title() -> void:
 	heading.add_theme_color_override("font_color", Color(0.93, 0.82, 0.48))
 	box.add_child(heading)
 	var sub := Label.new()
-	sub.text = "A struggle of hosts and hinterlands."
-	sub.add_theme_font_size_override("font_size", 20)
+	sub.text = "You are Alden Host. Vesper and Skelder are computer rivals."
+	sub.add_theme_font_size_override("font_size", 18)
 	sub.add_theme_color_override("font_color", Color(0.80, 0.74, 0.62))
 	box.add_child(sub)
-	var blurb := Label.new()
-	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	blurb.custom_minimum_size = Vector2(640, 0)
-	blurb.text = "Three hosts take a 28×20 hinterland split by an inland sea. You are Alden Host. Vesper Compact and Skelder Host answer through their own brains. Found a city, raise laborers, and study Delving, Skyfletch, or Ashlar. Coastal cities can launch skiffs. Assault a rival city. Found a faith. Adopt civics, assign specialists, found a charter, or spend spy points. Last sovereign standing — counting vassals — or the highest chronicle after turn 40 wins."
-	blurb.add_theme_color_override("font_color", Color(0.74, 0.70, 0.62))
-	box.add_child(blurb)
-	var how := Label.new()
-	how.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	how.custom_minimum_size = Vector2(640, 0)
-	how.text = "Play: New Game or Continue · move · Found City · Train Skiff on a coast · assault a city · civics / specialists / Offer the Yoke · Found / Spread a charter · Scout / Steal a Craft / Foment · Save Chronicle · End Turn.\nCamera: WASD / arrows, mouse wheel, right-drag.\nUnexplored tiles are black; explored tiles are dim; visible tiles are clear.\nSaves write to user://crownfall_save.json (Godot user data)."
-	how.add_theme_color_override("font_color", Color(0.68, 0.64, 0.56))
-	box.add_child(how)
+	var card := Label.new()
+	card.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	card.custom_minimum_size = Vector2(640, 0)
+	card.text = "Controls\n• Select a unit, then a highlighted tile to move.\n• Settler: Found City (F) on grass or plains, away from other cities.\n• City: train a warrior, settler, or laborer. More actions holds the rest.\n• End Turn (Enter). Vesper and Skelder then play.\n• Camera: WASD or arrows, mouse wheel, right-drag.\n• Black = unknown. Dim = explored. Clear = visible.\nLast host standing, or the highest chronicle after turn 40, wins."
+	card.add_theme_color_override("font_color", Color(0.78, 0.74, 0.64))
+	box.add_child(card)
 	var new_game := Button.new()
 	new_game.text = "New Game"
 	new_game.custom_minimum_size = Vector2(220, 44)
@@ -137,7 +131,7 @@ func _on_new_game() -> void:
 	session.new_game(seed_value, use_http)
 	map_view.bind(session)
 	hud.bind(session)
-	_clear_selection()
+	_select_opening_settler()
 	_center_on_human()
 	title.visible = false
 	hud.visible = true
@@ -161,6 +155,18 @@ func _on_continue() -> void:
 	world_root.visible = true
 	hud.refresh()
 	map_view.queue_redraw()
+
+
+func _select_opening_settler() -> void:
+	if session == null:
+		return
+	for unit in session.world.units_of(CrownMatch.HUMAN_ID):
+		if unit.unit_type == "settler":
+			selected_unit_id = unit.id
+			selected_city_id = -1
+			_push_selection()
+			return
+	_clear_selection()
 
 
 func _center_on_human() -> void:

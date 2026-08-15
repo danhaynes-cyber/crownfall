@@ -2,7 +2,6 @@ class_name CrownMatch
 extends RefCounted
 
 const HUMAN_ID := 1
-const AI_ID := 2
 
 var world: GameWorld
 var rules: RulesEngine
@@ -229,8 +228,10 @@ func _return_to_human() -> void:
 		return
 	world.current_player_id = HUMAN_ID
 	rules.refresh_moves(world, HUMAN_ID)
-	world.log_event("Turn %d begins for the Alden Host." % world.turn_number)
-	_turn_notes.append("Turn %d begins for the Alden Host." % world.turn_number)
+	var human_player := world.get_player(HUMAN_ID)
+	var who := human_player.display_name if human_player else "the human host"
+	world.log_event("Turn %d begins for %s." % [world.turn_number, who])
+	_turn_notes.append("Turn %d begins for %s." % [world.turn_number, who])
 
 
 func _finish_player_turn(player_id: int, notes: PackedStringArray) -> void:

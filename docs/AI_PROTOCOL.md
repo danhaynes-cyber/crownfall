@@ -284,11 +284,11 @@ Only emit members of `legal_actions`. A later model adapter can mimic this:
 4. Laborers improve or road the current tile, else walk to a high-value owned tile. Prefer roads that help a faith travel. Do not idle.
 5. Defend: if a city has no combat unit within 1 and a rival is visible (or the city is empty), walk the nearest combat unit home.
 6. Escort: never walk a settler onto a tile adjacent to a visible rival combat unit unless a friendly combat unit is also adjacent.
-7. Attack a rival city only when strength beats its defense. Otherwise approach / siege. Do not suicide into a strong garrison.
-8. Remaining combat: walk toward a visible rival city; else one explores fog and extras hunt visible rivals.
-9. Production: a skiff if a coastal city is boxed by water; otherwise combat if a rival city or threat is visible; laborer after the first city; settler before a second city; otherwise combat. Do not stamp endless warriors while the hinterland is unclaimed.
+7. Attack a rival city only when strength beats its defense. Otherwise approach / siege. Do not suicide into a strong garrison. Before turn 6, do not march the host across the map; take a city only if already nearby.
+8. Remaining combat: walk toward a visible rival city unless it is an early distant siege; else one explores fog and extras hunt visible rivals.
+9. Production: a skiff if a coastal city is boxed by water; laborer after the first city; warrior before a second city until turn 6; then a settler; otherwise combat if a threat is visible. Do not stamp endless warriors while the hinterland is unclaimed.
 10. Work the best owned adjacent tile.
-11. Adopt civics that match the plan (war → High Seat + Open Craft; expand/faith → Free Cantons + Open Craft; cash → Tithe). Never switch a civic already on the plan.
+11. Adopt civics that match the plan (war → High Seat + Open Craft; expand/faith → Free Cantons + Open Craft; cash → Tithe). Never switch a civic already on the plan. Do not switch before turn 8.
 12. Assign a chronicler when pushing culture or faith; a wright when training hosts.
 13. Offer the yoke to a weaker rival that still has 2+ cities; otherwise finish the conquest.
 14. Found a charter when eligible; spread to cities that would profit. Do not found a second charter if food is already thin.

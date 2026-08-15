@@ -242,7 +242,7 @@ func _can_place_unit(x: int, y: int, unit_type: String) -> bool:
 func can_unit_enter(unit: Unit, x: int, y: int) -> bool:
 	if unit == null:
 		return false
-	return _can_place_unit(x, y, unit.unit_type) or (in_bounds(x, y) and unit_at(x, y) == null and Defs.can_unit_enter_terrain(unit.unit_type, tile_at(x, y).terrain))
+	return _can_place_unit(x, y, unit.unit_type)
 
 
 func city_is_coastal(city: City) -> bool:

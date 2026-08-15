@@ -126,6 +126,7 @@ func _run(failures: PackedStringArray) -> void:
 	_test_civics_specialists_vassals(failures)
 	_test_corporations_espionage(failures)
 	_test_three_hosts_water(failures)
+	_test_hud_and_early_match(failures)
 
 
 func _test_culture_expands(failures: PackedStringArray, session: CrownMatch, city: GameWorld.City) -> void:
@@ -799,6 +800,10 @@ func _test_three_hosts_water(failures: PackedStringArray) -> void:
 					break
 	_expect(failures, moved, "skiff moved onto coast or ocean")
 	_expect(failures, Defs.is_water(session.world.tile_at(skiff.x, skiff.y).terrain), "skiff remains on water")
+	var beach := _first_land(session.world, skiff.x, skiff.y)
+	if beach != Vector2i(-1, -1):
+		var ashore := session.submit({"type": "move_unit", "unit_id": skiff.id, "to": {"x": beach.x, "y": beach.y}})
+		_expect(failures, not bool(ashore.get("ok", true)), "skiff cannot walk onto land")
 	var land := _first_land(session.world, coast.x, coast.y)
 	var warrior: GameWorld.Unit = session.world.spawn_unit("warrior", land.x, land.y, 1)
 	if warrior:
@@ -815,12 +820,19 @@ func _test_three_hosts_water(failures: PackedStringArray) -> void:
 	var capture := session.submit({"type": "attack_city", "unit_id": skiff.id, "city_id": inland.id})
 	_expect(failures, not bool(capture.get("ok", true)), "skiff cannot capture a city")
 	var save_path := "user://crownfall_smoke_three.json"
+	var skiff_id := skiff.id
+	var skelder_units: int = session.world.units_of(3).size()
+	var explored_before: int = session.world.get_player(1).explored.size()
 	_expect(failures, session.save_game(save_path), "wrote 3-host save")
 	var loaded := CrownMatch.new()
 	_expect(failures, loaded.load_game(save_path), "loaded 3-host save")
 	_expect(failures, loaded.world.players.size() == 3, "save/load keeps 3 players")
 	_expect(failures, loaded.world.get_player(3) != null, "Skelder survives the chronicle")
 	_expect(failures, loaded.world.width == 28, "save/load keeps the larger map")
+	var loaded_skiff: GameWorld.Unit = loaded.world.get_unit(skiff_id)
+	_expect(failures, loaded_skiff != null and loaded_skiff.unit_type == "skiff", "save/load keeps the skiff")
+	_expect(failures, loaded.world.units_of(3).size() == skelder_units, "save/load keeps Skelder's units")
+	_expect(failures, loaded.world.get_player(1).explored.size() == explored_before, "save/load keeps explored fog")
 
 	var three := CrownMatch.new()
 	three.new_game(20260815, false)
@@ -861,6 +873,96 @@ func _test_three_hosts_water(failures: PackedStringArray) -> void:
 		three.submit({"type": "attack_city", "unit_id": bow.id, "city_id": last.id})
 	_expect(failures, three.world.game_over, "domination after the last rival city falls")
 	_expect(failures, three.world.winner_id == 1, "human wins 3-host domination")
+
+
+func _test_hud_and_early_match(failures: PackedStringArray) -> void:
+	var hud := GameHud.new()
+	root.add_child(hud)
+	_expect(failures, hud._found != null, "HUD has Found City")
+	_expect(failures, hud._warrior != null and hud._settler != null and hud._worker != null, "HUD has primary train buttons")
+	_expect(failures, hud._more != null and hud._more_box != null, "HUD parks rare actions behind More")
+	_expect(failures, hud._more_box.visible == false, "More menu starts closed")
+	_expect(failures, hud._card != null, "HUD has a first-run control card")
+	var card := hud._control_card_text()
+	_expect(failures, card.find("Found City") >= 0 and card.find("End Turn") >= 0, "control card names the primary actions")
+	_expect(failures, card.find("WASD") >= 0, "control card names the camera")
+	hud.queue_free()
+
+	var play := CrownMatch.new()
+	play.new_game(20260815, false)
+	_expect(failures, not play.world.game_over, "opening turn is not already a victory")
+	_expect(failures, play.world.host_still_contending(1), "human contends on turn 1")
+	_expect(failures, play.world.host_still_contending(2) and play.world.host_still_contending(3), "both computer hosts contend on turn 1")
+	var settler: Variant = _first_of_type(play, 1, "settler")
+	if settler:
+		if not play.world.is_settleable(settler.x, settler.y):
+			var site := _nearest_settle(play, settler)
+			if site != Vector2i(-1, -1):
+				play.submit({"type": "move_unit", "unit_id": settler.id, "to": {"x": site.x, "y": site.y}})
+				settler = play.world.get_unit(settler.id)
+		if settler and play.world.is_settleable(settler.x, settler.y):
+			play.submit({"type": "found_city", "unit_id": settler.id})
+	_expect(failures, play.world.cities_of(1).size() >= 1, "early match: human founded")
+	for _i in range(6):
+		play.end_human_turn()
+		_expect(failures, not play.world.game_over, "early turn %d is not a victory" % play.world.turn_number)
+		_expect(failures, play.world.host_still_contending(1), "human still contends after turn %d" % play.world.turn_number)
+		_expect(failures, play.last_ai_actions.size() > 0, "AI still acts on turn %d" % play.world.turn_number)
+		_expect(failures, play.last_rejected.size() <= 16, "AI rejections stay bounded on turn %d" % play.world.turn_number)
+		_expect(failures, not _has_illegal_emit(play), "AI stays on legal types on turn %d" % play.world.turn_number)
+
+	var early := CrownMatch.new()
+	early.new_game(20260815, false)
+	var home := _first_land(early.world, 4, 4)
+	var prey_pos := _land_away(early.world, home.x, home.y, 8)
+	for unit_variant in early.world.units.duplicate():
+		early.world.remove_unit(unit_variant)
+	early.world.add_city(2, home.x, home.y, "Duskbarrow")
+	var prey: GameWorld.City = early.world.add_city(1, prey_pos.x, prey_pos.y, "Hartford")
+	var wpos := _land_near(early.world, home.x, home.y, 1)
+	var occupant: GameWorld.Unit = early.world.unit_at(wpos.x, wpos.y)
+	if occupant:
+		early.world.remove_unit(occupant)
+	var watcher: GameWorld.Unit = early.world.spawn_unit("warrior", wpos.x, wpos.y, 2)
+	_expect(failures, watcher != null, "early-siege: warrior")
+	if watcher == null:
+		return
+	watcher.x = wpos.x
+	watcher.y = wpos.y
+	watcher.moves_left = watcher.max_moves
+	var laborer: GameWorld.Unit = early.world.spawn_unit("worker", home.x, home.y, 2)
+	if laborer:
+		laborer.x = home.x
+		laborer.y = home.y
+	early.world.current_player_id = 2
+	early.world.turn_number = 1
+	for y in early.world.height:
+		for x in early.world.width:
+			early.world.get_player(2).explored[Defs.tile_key(x, y)] = true
+	early.world.recompute_visibility(2)
+	early.world.spy_reveal(2, prey.x, prey.y)
+	var before := Defs.chebyshev(watcher.x, watcher.y, prey.x, prey.y)
+	_expect(failures, before > 3, "early-siege setup is distant")
+	var acts: Array = RuleBrain.new().compute_actions(early.snapshot_for(2))
+	var marched := false
+	var trained_settler := false
+	var trained_warrior := false
+	for action in acts:
+		var kind := str(action.get("type", ""))
+		if kind == "move_unit" and int(action.get("unit_id", -1)) == watcher.id:
+			var dest: Dictionary = action.get("to", {})
+			var after := Defs.chebyshev(int(dest.get("x", 0)), int(dest.get("y", 0)), prey.x, prey.y)
+			if after < before:
+				marched = true
+		elif kind == "set_production":
+			if str(action.get("unit_type", "")) == "settler":
+				trained_settler = true
+			elif str(action.get("unit_type", "")) == "warrior":
+				trained_warrior = true
+	_expect(failures, not marched, "RuleBrain does not bee-line a distant city before turn 6")
+	_expect(failures, not trained_settler, "RuleBrain delays a second settler before turn 6")
+	_expect(failures, trained_warrior, "RuleBrain still trains a warrior in the early game")
+	_expect(failures, acts.size() > 0, "RuleBrain is not idle on turn 1")
 
 
 func _first_coast(world: GameWorld) -> Vector2i:

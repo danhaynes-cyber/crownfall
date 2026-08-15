@@ -13,13 +13,15 @@ extends AiBrain
 ## 6. Escort: never walk a settler onto a tile adjacent to a visible rival
 ##    combat unit unless a friendly combat unit is also adjacent.
 ## 7. Attack a rival city only when strength beats its defense. Otherwise
-##    approach / siege. Do not suicide into a strong garrison.
+##    approach / siege. Do not suicide into a strong garrison. Before
+##    turn 6, do not march the host across the map; take a city only if
+##    already adjacent.
 ## 8. Remaining combat: walk toward a visible rival city; else one explores
 ##    fog and extras hunt visible rivals.
 ## 9. Production: a skiff if a coastal city is boxed by water; otherwise
 ##    warrior/bowman if a rival city or threat is visible; worker after
-##    the first city; settler before a second city; otherwise combat.
-##    Never endless warriors while the hinterland is still unclaimed.
+##    the first city; settler before a second city (after turn 5); otherwise
+##    combat. Never endless warriors while the hinterland is still unclaimed.
 ## 10. Work the best owned adjacent tile. End turn.
 ## 11. Adopt civics that match the plan (war → High Seat + Open Craft;
 ##     expand/faith → Free Cantons + Open Craft; cash → Tithe). Never
@@ -196,6 +198,8 @@ func _pick_civics(state: Dictionary, legal: Array) -> Array:
 			continue
 		if civic_id != str(want.get(category, "")):
 			continue
+		if Defs.civic_in_category(adopted, category) != "" and _turn(state) < 8:
+			continue
 		out.append(action)
 		filled[category] = true
 	return out
@@ -368,6 +372,23 @@ func _should_attack_city(state: Dictionary, action: Dictionary) -> bool:
 	if attacker.is_empty() or city.is_empty():
 		return false
 	return int(attacker.get("strength", 0)) > int(city.get("defense", 99))
+
+
+func _turn(state: Dictionary) -> int:
+	return int(state.get("turn", 1))
+
+
+func _early_distant_siege(state: Dictionary, city: Dictionary) -> bool:
+	if _turn(state) >= 6:
+		return false
+	var cx: int = int(city.get("x", 0))
+	var cy: int = int(city.get("y", 0))
+	var nearest: int = 99
+	for unit in _own_units(state):
+		if not _is_combat(unit):
+			continue
+		nearest = mini(nearest, maxi(absi(int(unit.get("x", 0)) - cx), absi(int(unit.get("y", 0)) - cy)))
+	return nearest > 3
 
 
 func _pick_found_religion(legal: Array) -> Dictionary:
@@ -594,7 +615,7 @@ func _combat_moves(state: Dictionary, legal: Array, used_units: Dictionary) -> A
 	if combat_ids.is_empty():
 		return out
 	var siege := _nearest_rival_city(state)
-	if not siege.is_empty():
+	if not siege.is_empty() and not _early_distant_siege(state, siege):
 		for unit_id_variant in combat_ids:
 			var unit_id: int = int(unit_id_variant)
 			var step := _best_move_toward(legal, unit_id, int(siege.get("x", 0)), int(siege.get("y", 0)))
@@ -727,12 +748,14 @@ func _best_production(state: Dictionary, legal: Array) -> Array:
 			own_skiffs += 1
 	if _boxed_by_water(state) and own_skiffs == 0 and _can_train(legal, "skiff"):
 		want = "skiff"
-	elif threatened:
-		want = "bowman" if researched.has("skyfletch") else "warrior"
 	elif own_cities >= 1 and own_workers == 0:
 		want = "worker"
+	elif _turn(state) < 6 and own_cities < 2:
+		want = "warrior"
 	elif own_cities < 2 and own_settlers == 0:
 		want = "settler"
+	elif threatened:
+		want = "bowman" if researched.has("skyfletch") else "warrior"
 	elif own_workers < own_cities and own_combat >= own_cities:
 		want = "worker"
 	elif researched.has("skyfletch") and own_combat >= 1:

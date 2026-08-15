@@ -8,16 +8,36 @@ The **Vesper Compact** and **Skelder Host** each answer through their own
 This is original work. It is not affiliated with any other studio and ships
 no third-party art, music, or UI chrome.
 
-## Play the first slice (Mac)
+## How to play on a Mac (60 seconds)
 
-1. Install [Godot 4.4](https://godotengine.org/download/macos/) (4.3+ also
-   opens the project; 4.4 is what CI uses).
-2. Open `godot/project.godot` in the Godot editor. The first open imports
-   the project and may generate `.uid` files; that is expected.
-3. Press **Play**.
-4. Click **New Game**.
+You do not need to know Godot. You are only using it as the player.
 
-On the field:
+1. Download **Godot 4.4** for macOS from
+   [godotengine.org/download/macos](https://godotengine.org/download/macos/).
+   Pick the standard build, not the .NET one. 4.3+ will open the project;
+   4.4 is what this repo is built against.
+2. Open the Godot app. If macOS says it cannot be opened, go to
+   **System Settings → Privacy & Security** and click **Open Anyway**.
+3. In Godot, choose **Import**, pick `godot/project.godot` from this folder,
+   then **Import & Edit**. The first open imports assets and may add `.uid`
+   files; that is expected.
+4. Press the **Play** button in the top-right (or **Cmd+B**).
+5. Click **New Game**. **Continue** appears if you already saved a chronicle.
+
+You are the gold **Alden Host**. Purple Vesper and rust Skelder are the
+computer. A short control card is on the title screen and again on the
+first three turns.
+
+- Click a unit, then a highlighted tile to move.
+- Settler: **Found City** (or `F`) on grass or plains, away from other cities.
+- City: train a warrior, settler, or laborer. **More actions** holds the rest.
+- **End Turn** (`Enter` or `Space`). The two computer hosts then play.
+- Camera: `WASD` or arrows, mouse wheel to zoom, right-drag to pan.
+- Black tiles are unknown. Dim tiles are explored. Clear tiles are visible.
+
+Last host standing wins, or the highest chronicle after turn 40.
+
+## On the field
 
 - Click a unit, then a highlighted tile to move (8 directions). Roads cost 1.
   Unexplored tiles are black, explored tiles are dim, visible tiles are clear.
