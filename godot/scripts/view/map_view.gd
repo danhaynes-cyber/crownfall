@@ -191,6 +191,19 @@ func _draw_highlights(world: GameWorld) -> void:
 				var wr := Rect2(pos.x * TILE + 6, pos.y * TILE + 6, TILE - 12, TILE - 12)
 				draw_rect(wr, Color(1, 1, 1, 0.10))
 				draw_rect(wr, Color(0.85, 0.9, 1.0, 0.55), false, 1.5)
+	var selected := world.get_unit(selected_unit_id)
+	if selected != null and Defs.is_combat(selected.unit_type) and selected.moves_left > 0:
+		for rival_variant in world.cities:
+			var rival: GameWorld.City = rival_variant
+			if rival.owner_id == selected.owner_id:
+				continue
+			if not world.is_visible(viewer_id, rival.x, rival.y):
+				continue
+			if Defs.chebyshev(selected.x, selected.y, rival.x, rival.y) != 1:
+				continue
+			var ar := Rect2(rival.x * TILE + 4, rival.y * TILE + 4, TILE - 8, TILE - 8)
+			draw_rect(ar, Color(0.86, 0.28, 0.18, 0.22))
+			draw_rect(ar, Color(0.92, 0.36, 0.22, 0.85), false, 2.0)
 
 
 func _draw_cities(world: GameWorld) -> void:

@@ -10,6 +10,7 @@ var map_view: MapView
 var camera: Camera2D
 var hud: GameHud
 var title: CanvasLayer
+var _continue_btn: Button
 var selected_unit_id: int = -1
 var selected_city_id: int = -1
 var dragging := false
@@ -51,6 +52,9 @@ func _build_hud() -> void:
 	hud.build_improvement_pressed.connect(_on_build_improvement)
 	hud.build_route_pressed.connect(_on_build_route)
 	hud.research_pressed.connect(_on_research)
+	hud.found_religion_pressed.connect(_on_found_religion)
+	hud.adopt_religion_pressed.connect(_on_adopt_religion)
+	hud.save_pressed.connect(_on_save)
 	hud.title_pressed.connect(_show_title)
 
 
@@ -80,13 +84,13 @@ func _build_title() -> void:
 	var blurb := Label.new()
 	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	blurb.custom_minimum_size = Vector2(640, 0)
-	blurb.text = "Found a city, watch its culture claim the hinterland, raise laborers to farm and road the land, and study Delving, Skyfletch, or Ashlar. The Vesper Compact answers through an AiBrain."
+	blurb.text = "Found a city, watch its culture claim the hinterland, raise laborers to farm and road the land, and study Delving, Skyfletch, or Ashlar. Assault a rival city to capture it. Found Hearthbind, Veilpsalm, or Rivercant. Last host standing — or the highest chronicle after turn 40 — wins. The Vesper Compact answers through an AiBrain."
 	blurb.add_theme_color_override("font_color", Color(0.74, 0.70, 0.62))
 	box.add_child(blurb)
 	var how := Label.new()
 	how.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	how.custom_minimum_size = Vector2(640, 0)
-	how.text = "Play: New Game · click a unit · click a highlighted tile to move · Found City · build with a laborer · research · End Turn.\nCamera: WASD / arrows, mouse wheel, right-drag."
+	how.text = "Play: New Game or Continue · click a unit · click a highlighted tile to move · Found City · assault an adjacent rival city · found or adopt a faith · Save Chronicle · End Turn.\nCamera: WASD / arrows, mouse wheel, right-drag.\nSaves write to user://crownfall_save.json (Godot user data)."
 	how.add_theme_color_override("font_color", Color(0.68, 0.64, 0.56))
 	box.add_child(how)
 	var new_game := Button.new()
@@ -94,6 +98,11 @@ func _build_title() -> void:
 	new_game.custom_minimum_size = Vector2(220, 44)
 	new_game.pressed.connect(_on_new_game)
 	box.add_child(new_game)
+	_continue_btn = Button.new()
+	_continue_btn.text = "Continue"
+	_continue_btn.custom_minimum_size = Vector2(220, 44)
+	_continue_btn.pressed.connect(_on_continue)
+	box.add_child(_continue_btn)
 	var note := Label.new()
 	note.text = "Original work. Not affiliated with any other studio."
 	note.add_theme_font_size_override("font_size", 12)
@@ -107,6 +116,8 @@ func _show_title() -> void:
 	world_root.visible = false
 	selected_unit_id = -1
 	selected_city_id = -1
+	if _continue_btn:
+		_continue_btn.visible = CrownMatch.has_save()
 
 
 func _on_new_game() -> void:
@@ -116,6 +127,23 @@ func _on_new_game() -> void:
 		seed_value = int(OS.get_environment("CROWNFALL_SEED"))
 	var use_http := OS.get_environment("CROWNFALL_AI_URL") != ""
 	session.new_game(seed_value, use_http)
+	map_view.bind(session)
+	hud.bind(session)
+	_clear_selection()
+	_center_on_human()
+	title.visible = false
+	hud.visible = true
+	world_root.visible = true
+	hud.refresh()
+	map_view.queue_redraw()
+
+
+func _on_continue() -> void:
+	session = CrownMatch.new()
+	if not session.load_game():
+		return
+	var use_http := OS.get_environment("CROWNFALL_AI_URL") != ""
+	session.configure_brain(use_http)
 	map_view.bind(session)
 	hud.bind(session)
 	_clear_selection()
@@ -193,7 +221,7 @@ func _on_tile_hovered(x: int, y: int) -> void:
 
 
 func _on_tile_clicked(x: int, y: int) -> void:
-	if session == null or ai_busy:
+	if session == null or ai_busy or session.world.game_over:
 		return
 	var world := session.world
 	var unit := world.unit_at(x, y)
@@ -201,6 +229,11 @@ func _on_tile_clicked(x: int, y: int) -> void:
 	if selected_unit_id >= 0:
 		var selected := world.get_unit(selected_unit_id)
 		if selected != null and selected.owner_id == CrownMatch.HUMAN_ID:
+			if city != null and city.owner_id != CrownMatch.HUMAN_ID and Defs.is_combat(selected.unit_type):
+				if Defs.chebyshev(selected.x, selected.y, city.x, city.y) == 1:
+					session.submit({"type": "attack_city", "unit_id": selected_unit_id, "city_id": city.id})
+					_refresh_selection()
+					return
 			if unit != null and unit.owner_id != CrownMatch.HUMAN_ID:
 				var dist := Defs.chebyshev(selected.x, selected.y, unit.x, unit.y)
 				if dist <= Defs.unit_range(selected.unit_type):
@@ -265,8 +298,37 @@ func _on_research(tech_id: String) -> void:
 	hud.refresh()
 
 
+func _on_found_religion() -> void:
+	if session == null or session.world.game_over:
+		return
+	for action in session.rules.list_legal_actions(session.world, CrownMatch.HUMAN_ID):
+		if str(action.get("type", "")) == "found_religion":
+			session.submit(action)
+			hud.refresh()
+			map_view.queue_redraw()
+			return
+
+
+func _on_adopt_religion() -> void:
+	if session == null or session.world.game_over:
+		return
+	for action in session.rules.list_legal_actions(session.world, CrownMatch.HUMAN_ID):
+		if str(action.get("type", "")) == "adopt_religion":
+			session.submit(action)
+			hud.refresh()
+			return
+
+
+func _on_save() -> void:
+	if session == null:
+		return
+	if session.save_game():
+		session.world.log_event("The chronicle was written to user://crownfall_save.json.")
+		hud.refresh()
+
+
 func _on_end_turn() -> void:
-	if session == null or ai_busy:
+	if session == null or ai_busy or session.world.game_over:
 		return
 	ai_busy = true
 	session.begin_end_human_turn()

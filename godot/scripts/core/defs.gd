@@ -9,6 +9,9 @@ const CITY_MIN_DISTANCE := 3
 const UNIT_VISION := 1
 const CITY_VISION := 2
 const MAX_AI_ACTIONS := 32
+const TURN_CAP := 40
+const FAITH_FOUND_CULTURE := 8
+const SAVE_PATH := "user://crownfall_save.json"
 
 const DIRS: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
@@ -50,6 +53,14 @@ const TECHS := {
 }
 
 const TECH_ORDER: Array[String] = ["delving", "skyfletch", "ashlar"]
+
+const FAITHS := {
+	"hearthbind": {"name": "Hearthbind"},
+	"veilpsalm": {"name": "Veilpsalm"},
+	"rivercant": {"name": "Rivercant"},
+}
+
+const FAITH_ORDER: Array[String] = ["hearthbind", "veilpsalm", "rivercant"]
 
 const CITY_NAME_POOLS := {
 	1: ["Rivermark", "Oakhold", "Goldensill", "Thornwatch", "Dawnmere", "Hartford"],
@@ -205,6 +216,17 @@ static func city_name(player_id: int, index: int) -> String:
 	if index < pool.size():
 		return String(pool[index])
 	return "Newstead %d" % [index + 1]
+
+
+static func faith_name(faith_id: String) -> String:
+	return str(FAITHS.get(faith_id, {}).get("name", faith_id))
+
+
+static func next_unfounded_faith(founded_ids: Array) -> String:
+	for faith_id in FAITH_ORDER:
+		if not founded_ids.has(faith_id):
+			return faith_id
+	return ""
 
 
 static func unit_letter(unit_type: String) -> String:

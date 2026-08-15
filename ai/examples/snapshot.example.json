@@ -39,6 +39,19 @@
   "cities": [],
   "resources": [],
   "legal_actions": [{ "type": "end_turn" }],
+  "faiths": {
+    "catalog": [
+      { "id": "hearthbind", "name": "Hearthbind" },
+      { "id": "veilpsalm", "name": "Veilpsalm" },
+      { "id": "rivercant", "name": "Rivercant" }
+    ],
+    "founded": [],
+    "state_religion": ""
+  },
+  "game_over": false,
+  "winner_id": -1,
+  "victory_kind": "",
+  "victory_scores": [],
   "hooks": {
     "civics": [],
     "state_religion": "",

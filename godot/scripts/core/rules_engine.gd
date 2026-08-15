@@ -5,32 +5,46 @@ extends RefCounted
 func apply(world: GameWorld, action: Dictionary) -> Dictionary:
 	if action == null or action.is_empty():
 		return _fail("empty_action")
+	if world.game_over:
+		return _fail("game_over")
 	var action_type := str(action.get("type", ""))
+	var result := _fail("unknown_action_type")
 	match action_type:
 		"move_unit":
-			return _move_unit(world, action)
+			result = _move_unit(world, action)
 		"attack":
-			return _attack(world, action)
+			result = _attack(world, action)
+		"attack_city":
+			result = _attack_city(world, action)
 		"found_city":
-			return _found_city(world, action)
+			result = _found_city(world, action)
 		"set_production":
-			return _set_production(world, action)
+			result = _set_production(world, action)
 		"work_tile":
-			return _work_tile(world, action)
+			result = _work_tile(world, action)
 		"build_improvement":
-			return _build_improvement(world, action)
+			result = _build_improvement(world, action)
 		"build_route":
-			return _build_route(world, action)
+			result = _build_route(world, action)
 		"research":
-			return _research(world, action)
+			result = _research(world, action)
+		"found_religion":
+			result = _found_religion(world, action)
+		"adopt_religion":
+			result = _adopt_religion(world, action)
 		"end_turn":
-			return {"ok": true, "ended": true, "message": ""}
+			result = {"ok": true, "ended": true, "message": ""}
 		_:
-			return _fail("unknown_action_type")
+			result = _fail("unknown_action_type")
+	if result.get("ok"):
+		evaluate_victory(world)
+	return result
 
 
 func list_legal_actions(world: GameWorld, player_id: int) -> Array:
 	var actions: Array = []
+	if world.game_over:
+		return actions
 	for unit_variant in world.units_of(player_id):
 		var unit: GameWorld.Unit = unit_variant
 		if Defs.can_found(unit.unit_type) and world.is_settleable(unit.x, unit.y) and unit.moves_left > 0:
@@ -50,6 +64,16 @@ func list_legal_actions(world: GameWorld, player_id: int) -> Array:
 						"type": "attack",
 						"unit_id": unit.id,
 						"target_unit_id": foe.id,
+					})
+			for city_variant in world.cities:
+				var rival: GameWorld.City = city_variant
+				if rival.owner_id == player_id:
+					continue
+				if Defs.chebyshev(unit.x, unit.y, rival.x, rival.y) == 1:
+					actions.append({
+						"type": "attack_city",
+						"unit_id": unit.id,
+						"city_id": rival.id,
 					})
 		if Defs.can_build(unit.unit_type) and unit.moves_left > 0:
 			var player: GameWorld.Player = world.get_player(player_id)
@@ -107,6 +131,15 @@ func list_legal_actions(world: GameWorld, player_id: int) -> Array:
 			if researcher.researching == tech_id:
 				continue
 			actions.append({"type": "research", "tech_id": tech_id})
+		if _can_found_faith(world, researcher):
+			var next_faith := Defs.next_unfounded_faith(world.founded_faith_ids())
+			if next_faith != "":
+				actions.append({"type": "found_religion", "religion_id": next_faith})
+		for faith_id in world.founded_faith_ids():
+			if researcher.state_religion == faith_id:
+				continue
+			if _can_adopt(world, researcher, str(faith_id)):
+				actions.append({"type": "adopt_religion", "religion_id": faith_id})
 	actions.append({"type": "end_turn"})
 	return actions
 
@@ -148,6 +181,8 @@ func process_economy(world: GameWorld, player_id: int) -> PackedStringArray:
 		var grown: GameWorld.City = city_variant
 		if grown.border_radius > int(old_radius.get(grown.id, 1)):
 			notes.append("%s culture now claims a radius of %d." % [grown.name, grown.border_radius])
+	_spread_faiths(world, notes)
+	evaluate_victory(world)
 	return notes
 
 
@@ -395,6 +430,184 @@ func _progress_research(world: GameWorld, player: GameWorld.Player, notes: Packe
 		notes.append("%s unearthed %s." % [player.display_name, Defs.tech_name(player.researching)])
 		player.researching = ""
 		player.research_progress = 0
+
+
+func _attack_city(world: GameWorld, action: Dictionary) -> Dictionary:
+	var unit := world.get_unit(int(action.get("unit_id", -1)))
+	var city := world.get_city(int(action.get("city_id", -1)))
+	if unit == null:
+		return _fail("unknown_unit")
+	if city == null:
+		return _fail("unknown_city")
+	if unit.owner_id != world.current_player_id:
+		return _fail("not_your_unit")
+	if city.owner_id == unit.owner_id:
+		return _fail("own_city")
+	if unit.strength <= 0:
+		return _fail("cannot_attack")
+	if unit.moves_left < 1:
+		return _fail("no_moves")
+	if Defs.chebyshev(unit.x, unit.y, city.x, city.y) != 1:
+		return _fail("not_adjacent")
+	var defense := world.city_defense(city)
+	var atk := unit.strength
+	unit.moves_left = 0
+	if atk > defense:
+		_capture_city(world, unit, city)
+		world.recompute_visibility(unit.owner_id)
+		return _ok("A %s seized %s (%d vs defense %d)." % [unit.unit_type, city.name, atk, defense])
+	unit.hp -= 1
+	var held := "%s held (%d vs defense %d)." % [city.name, atk, defense]
+	if unit.hp <= 0:
+		world.remove_unit(unit)
+		return _ok("A %s broke against %s." % [unit.unit_type, city.name])
+	return _ok(held)
+
+
+func _capture_city(world: GameWorld, attacker: GameWorld.Unit, city: GameWorld.City) -> void:
+	var old_owner: int = city.owner_id
+	for occupant_variant in world.units_at(city.x, city.y):
+		var occupant: GameWorld.Unit = occupant_variant
+		if occupant.owner_id == old_owner:
+			world.remove_unit(occupant)
+	city.owner_id = attacker.owner_id
+	city.production_type = ""
+	city.stored_production = 0
+	city.worked.clear()
+	city.worked.append(Vector2i(city.x, city.y))
+	var tile := world.tile_at(city.x, city.y)
+	if tile:
+		tile.culture_owner_id = attacker.owner_id
+	world.recompute_culture_borders()
+	world.auto_assign_work(city)
+	if world.unit_at(city.x, city.y) == null:
+		attacker.x = city.x
+		attacker.y = city.y
+
+
+func _can_found_faith(world: GameWorld, player: GameWorld.Player) -> bool:
+	if player == null:
+		return false
+	if Defs.next_unfounded_faith(world.founded_faith_ids()) == "":
+		return false
+	if world.cities_of(player.id).is_empty():
+		return false
+	if player.culture >= Defs.FAITH_FOUND_CULTURE:
+		return true
+	return player.researched.has("ashlar")
+
+
+func _found_religion(world: GameWorld, action: Dictionary) -> Dictionary:
+	var player := world.get_player(world.current_player_id)
+	if player == null:
+		return _fail("unknown_player")
+	if not _can_found_faith(world, player):
+		return _fail("cannot_found")
+	var faith := Defs.next_unfounded_faith(world.founded_faith_ids())
+	var requested := str(action.get("religion_id", ""))
+	if requested != "" and requested != faith:
+		return _fail("not_next_faith")
+	var cities: Array = world.cities_of(player.id)
+	var founder_city: GameWorld.City = cities[0]
+	world.founded_faiths.append({"id": faith, "founder_id": player.id})
+	if not founder_city.religions.has(faith):
+		founder_city.religions.append(faith)
+	if player.state_religion == "":
+		player.state_religion = faith
+	return _ok("%s founded %s in %s." % [player.display_name, Defs.faith_name(faith), founder_city.name])
+
+
+func _can_adopt(world: GameWorld, player: GameWorld.Player, faith: String) -> bool:
+	if player == null or faith == "":
+		return false
+	if not world.is_faith_founded(faith):
+		return false
+	if player.state_religion == faith:
+		return false
+	for city_variant in world.cities_of(player.id):
+		var city: GameWorld.City = city_variant
+		if city.religions.has(faith):
+			return true
+	return false
+
+
+func _adopt_religion(world: GameWorld, action: Dictionary) -> Dictionary:
+	var player := world.get_player(world.current_player_id)
+	if player == null:
+		return _fail("unknown_player")
+	var faith := str(action.get("religion_id", ""))
+	if not _can_adopt(world, player, faith):
+		return _fail("cannot_adopt")
+	player.state_religion = faith
+	return _ok("%s adopted %s as the state faith." % [player.display_name, Defs.faith_name(faith)])
+
+
+func _spread_faiths(world: GameWorld, notes: PackedStringArray) -> void:
+	var sources: Array[Dictionary] = []
+	for city_variant in world.cities:
+		var city: GameWorld.City = city_variant
+		for faith in city.religions:
+			sources.append({"x": city.x, "y": city.y, "owner_id": city.owner_id, "faith": str(faith)})
+	for dest_variant in world.cities:
+		var dest: GameWorld.City = dest_variant
+		var dest_tile := world.tile_at(dest.x, dest.y)
+		for source in sources:
+			var faith: String = str(source.faith)
+			if dest.religions.has(faith):
+				continue
+			var dist := Defs.chebyshev(int(source.x), int(source.y), dest.x, dest.y)
+			if dist < 1:
+				continue
+			var same_owner: bool = dest.owner_id == int(source.owner_id)
+			var on_owned_culture: bool = dest_tile != null and dest_tile.culture_owner_id == int(source.owner_id)
+			if not same_owner and not on_owned_culture:
+				continue
+			var chance := 0.0
+			if dist == 1:
+				chance = 0.18
+			elif same_owner and dist <= 3:
+				chance = 0.08
+			else:
+				continue
+			if dest_tile != null and dest_tile.route == "road":
+				chance += 0.24
+			if world.rng.randf() < chance:
+				dest.religions.append(faith)
+				notes.append("%s reached %s." % [Defs.faith_name(faith), dest.name])
+
+
+func evaluate_victory(world: GameWorld) -> void:
+	if world.game_over:
+		return
+	var contenders: Array[int] = []
+	for player_variant in world.players:
+		var player: GameWorld.Player = player_variant
+		if world.host_still_contending(player.id):
+			contenders.append(player.id)
+	if contenders.size() == 1:
+		var winner: GameWorld.Player = world.get_player(contenders[0])
+		world.declare_victory(contenders[0], "domination")
+		world.log_event("%s claims the field by domination." % (winner.display_name if winner else "A host"))
+		return
+	if contenders.is_empty():
+		world.declare_victory(-1, "stalemate")
+		world.log_event("No host remains to claim the hinterland.")
+		return
+	if world.turn_number > Defs.TURN_CAP:
+		var best_id: int = -1
+		var best_score: int = -1
+		for pid in contenders:
+			var score: int = world.victory_score(pid)
+			if score > best_score:
+				best_score = score
+				best_id = pid
+		var victor: GameWorld.Player = world.get_player(best_id)
+		world.declare_victory(best_id, "score")
+		world.log_event("%s leads on the chronicle after %d turns (%d)." % [
+			victor.display_name if victor else "A host",
+			Defs.TURN_CAP,
+			best_score,
+		])
 
 
 func _ok(message: String) -> Dictionary:

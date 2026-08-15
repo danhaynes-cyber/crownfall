@@ -34,9 +34,20 @@ def choose_actions(state: dict) -> list:
             take(action)
             break
     for action in legal:
+        if action.get("type") == "found_religion":
+            take(action)
+            break
+    for action in legal:
+        if action.get("type") == "adopt_religion":
+            take(action)
+            break
+    for action in legal:
         if action.get("type") == "found_city":
             take(action)
             break
+    for action in legal:
+        if action.get("type") == "attack_city" and int(action.get("unit_id", -1)) not in used:
+            take(action)
     for action in legal:
         if action.get("type") == "build_improvement" and int(action.get("unit_id", -1)) not in used:
             take(action)

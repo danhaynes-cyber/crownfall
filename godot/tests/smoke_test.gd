@@ -1,7 +1,7 @@
 extends SceneTree
 
-## Headless check for the second slice: culture, laborers, techs, smarter
-## RuleBrain, and HttpBrain fallback.
+## Headless check: culture, laborers, techs, capture, faith, victory,
+## save/load, smarter RuleBrain, and HttpBrain fallback.
 
 
 func _init() -> void:
@@ -37,8 +37,10 @@ func _run(failures: PackedStringArray) -> void:
 	_expect(failures, rivers > 0, "river overlay present")
 
 	var snap := session.snapshot_for(1)
-	for key in ["protocol_version", "tiles", "units", "cities", "resources", "scores", "legal_actions", "economy", "hooks", "techs"]:
+	for key in ["protocol_version", "tiles", "units", "cities", "resources", "scores", "legal_actions", "economy", "hooks", "techs", "faiths", "game_over", "winner_id", "victory_kind", "victory_scores"]:
 		_expect(failures, snap.has(key), "snapshot has %s" % key)
+	_expect(failures, snap["hooks"].has("state_religion"), "hooks.state_religion present")
+	_expect(failures, bool(snap.get("game_over", true)) == false, "new match is not over")
 	_expect(failures, snap["legal_actions"] is Array and snap["legal_actions"].size() > 0, "legal actions listed")
 	_expect(failures, snap["hooks"].has("civics"), "civics hook")
 	_expect(failures, snap["techs"].has("catalog") and snap["techs"]["catalog"].size() == 3, "tech catalog")
@@ -113,6 +115,8 @@ func _run(failures: PackedStringArray) -> void:
 
 	_test_rulebrain_garrison(failures)
 	_test_rulebrain_escort(failures)
+	_test_capture_faith_victory_save(failures)
+	_test_rulebrain_city_and_faith(failures)
 
 
 func _test_culture_expands(failures: PackedStringArray, session: CrownMatch, city: GameWorld.City) -> void:
@@ -273,10 +277,219 @@ func _test_rulebrain_escort(failures: PackedStringArray) -> void:
 	_expect(failures, not walked_into_danger, "RuleBrain does not walk a settler next to a rival warrior without escort")
 
 
+func _test_capture_faith_victory_save(failures: PackedStringArray) -> void:
+	var session := CrownMatch.new()
+	session.new_game(20260815, false)
+	var human_site := _first_land(session.world, 8, 8)
+	var rival_site := _land_away(session.world, human_site.x, human_site.y, Defs.CITY_MIN_DISTANCE)
+	for unit_variant in session.world.units.duplicate():
+		session.world.remove_unit(unit_variant)
+	var human_city: GameWorld.City = session.world.add_city(1, human_site.x, human_site.y, "Rivermark")
+	var rival_city: GameWorld.City = session.world.add_city(2, rival_site.x, rival_site.y, "Embercairn")
+	session.world.recompute_culture_borders()
+	session.world.recompute_visibility(1)
+	session.world.current_player_id = 1
+
+	var player: GameWorld.Player = session.human()
+	player.culture = Defs.FAITH_FOUND_CULTURE
+	var legal: Array = session.rules.list_legal_actions(session.world, 1)
+	var can_found := false
+	for action in legal:
+		if str(action.get("type", "")) == "found_religion":
+			can_found = true
+	_expect(failures, can_found, "found_religion is legal at culture threshold")
+	var founded := session.submit({"type": "found_religion", "religion_id": "hearthbind"})
+	_expect(failures, bool(founded.get("ok", false)), "found Hearthbind: %s" % str(founded.get("error", founded.get("message", ""))))
+	_expect(failures, player.state_religion == "hearthbind", "founder auto-adopts Hearthbind")
+	_expect(failures, human_city.religions.has("hearthbind"), "founder city follows Hearthbind")
+	var snap := session.snapshot_for(1)
+	_expect(failures, str(snap.get("hooks", {}).get("state_religion", "")) == "hearthbind", "hooks.state_religion filled")
+	_expect(failures, snap.get("faiths", {}).get("founded", []).size() == 1, "faiths.founded lists Hearthbind")
+
+	session.world.founded_faiths.append({"id": "veilpsalm", "founder_id": 2})
+	if not human_city.religions.has("veilpsalm"):
+		human_city.religions.append("veilpsalm")
+	var adopted := session.submit({"type": "adopt_religion", "religion_id": "veilpsalm"})
+	_expect(failures, bool(adopted.get("ok", false)), "adopt Veilpsalm")
+	_expect(failures, player.state_religion == "veilpsalm", "state faith is Veilpsalm")
+	player.researched.append("delving")
+	var yld: Dictionary = session.world.city_yields(human_city)
+	_expect(failures, int(yld.get("gold", 0)) >= 2 and int(yld.get("culture", 0)) >= 2, "state faith bonus on matching city")
+
+	var save_path := "user://crownfall_smoke_save.json"
+	_expect(failures, session.save_game(save_path), "wrote smoke save")
+	var units_before: int = session.world.units.size()
+	var gold_before: int = player.gold
+	player.gold += 99
+	var loaded := CrownMatch.new()
+	_expect(failures, loaded.load_game(save_path), "loaded smoke save")
+	_expect(failures, loaded.world.cities_of(1).size() == 1, "load restores human city")
+	_expect(failures, loaded.world.cities_of(2).size() == 1, "load restores rival city")
+	_expect(failures, loaded.world.get_player(1).state_religion == "veilpsalm", "load restores state faith")
+	_expect(failures, loaded.world.get_player(1).researched.has("delving"), "load restores techs")
+	_expect(failures, loaded.world.founded_faith_ids().has("hearthbind"), "load restores founded faiths")
+	_expect(failures, loaded.world.get_player(1).gold == gold_before, "load restores gold, not the mutation")
+	_expect(failures, loaded.world.units.size() == units_before, "load restores unit count")
+	session = loaded
+	session.world.current_player_id = 1
+	human_city = session.world.cities_of(1)[0]
+	rival_city = session.world.cities_of(2)[0]
+	player = session.human()
+
+	var rival_tile: GameWorld.Tile = session.world.tile_at(rival_city.x, rival_city.y)
+	rival_tile.terrain = "grass"
+	rival_city.culture_total = 0
+	rival_city.border_radius = 1
+	var approach := _land_near(session.world, rival_city.x, rival_city.y, 1)
+	var occupant: GameWorld.Unit = session.world.unit_at(approach.x, approach.y)
+	if occupant:
+		session.world.remove_unit(occupant)
+	var garrison: GameWorld.Unit = session.world.spawn_unit("warrior", rival_city.x, rival_city.y, 2)
+	if garrison:
+		garrison.x = rival_city.x
+		garrison.y = rival_city.y
+	var attacker: GameWorld.Unit = session.world.spawn_unit("bowman", approach.x, approach.y, 1)
+	_expect(failures, attacker != null, "spawned attacker")
+	if attacker == null:
+		return
+	attacker.x = approach.x
+	attacker.y = approach.y
+	attacker.moves_left = attacker.max_moves
+	session.world.recompute_visibility(1)
+	var city_snap := session.snapshot_for(1)
+	var saw_defense := false
+	var saw_attack := false
+	for city in city_snap.get("cities", []):
+		if int(city.get("id", -1)) == rival_city.id:
+			saw_defense = city.has("defense") and city.has("garrison_count")
+	for action in city_snap.get("legal_actions", []):
+		if str(action.get("type", "")) == "attack_city" and int(action.get("city_id", -1)) == rival_city.id:
+			saw_attack = true
+	_expect(failures, saw_defense, "snapshot city has defense and garrison_count")
+	_expect(failures, saw_attack, "legal_actions includes attack_city")
+	var captured := session.submit({"type": "attack_city", "unit_id": attacker.id, "city_id": rival_city.id})
+	_expect(failures, bool(captured.get("ok", false)), "attack_city applied: %s" % str(captured.get("error", captured.get("message", ""))))
+	_expect(failures, rival_city.owner_id == 1, "capture transfers the city")
+	_expect(failures, session.world.cities_of(2).is_empty(), "rival has no cities after capture")
+	if garrison:
+		_expect(failures, session.world.get_unit(garrison.id) == null, "garrison destroyed on capture")
+	_expect(failures, session.world.game_over, "domination victory after last rival city falls")
+	_expect(failures, session.world.winner_id == 1, "human wins domination")
+	_expect(failures, session.world.victory_kind == "domination", "victory_kind is domination")
+	var blocked := session.submit({"type": "end_turn"})
+	_expect(failures, not bool(blocked.get("ok", true)), "game_over rejects further actions")
+	_expect(failures, session.rules.list_legal_actions(session.world, 1).is_empty(), "no legal actions after game_over")
+	var over_snap := session.snapshot_for(1)
+	_expect(failures, bool(over_snap.get("game_over", false)), "snapshot game_over")
+	_expect(failures, int(over_snap.get("winner_id", -1)) == 1, "snapshot winner_id")
+
+	var score_session := CrownMatch.new()
+	score_session.new_game(20260815, false)
+	var a := _first_land(score_session.world, 5, 5)
+	var b := _land_away(score_session.world, a.x, a.y, Defs.CITY_MIN_DISTANCE)
+	score_session.world.add_city(1, a.x, a.y, "Oakhold")
+	score_session.world.add_city(2, b.x, b.y, "Nightwell")
+	score_session.human().culture = 40
+	score_session.world.turn_number = Defs.TURN_CAP + 1
+	score_session.rules.evaluate_victory(score_session.world)
+	_expect(failures, score_session.world.game_over, "score victory after turn cap")
+	_expect(failures, score_session.world.winner_id == 1, "higher chronicle wins on time")
+	_expect(failures, score_session.world.victory_kind == "score", "victory_kind is score")
+
+
+func _test_rulebrain_city_and_faith(failures: PackedStringArray) -> void:
+	var win_session := CrownMatch.new()
+	win_session.new_game(20260815, false)
+	var site := _first_land(win_session.world, 7, 7)
+	var rival := _land_away(win_session.world, site.x, site.y, Defs.CITY_MIN_DISTANCE)
+	for unit_variant in win_session.world.units.duplicate():
+		win_session.world.remove_unit(unit_variant)
+	var prey: GameWorld.City = win_session.world.add_city(1, site.x, site.y, "Hartford")
+	win_session.world.tile_at(prey.x, prey.y).terrain = "grass"
+	prey.culture_total = 0
+	prey.border_radius = 1
+	win_session.world.add_city(2, rival.x, rival.y, "Ashfen")
+	var step := _land_near(win_session.world, prey.x, prey.y, 1)
+	var occupant: GameWorld.Unit = win_session.world.unit_at(step.x, step.y)
+	if occupant:
+		win_session.world.remove_unit(occupant)
+	var warrior: GameWorld.Unit = win_session.world.spawn_unit("warrior", step.x, step.y, 2)
+	if warrior == null:
+		_expect(failures, false, "city-brain: warrior")
+		return
+	warrior.x = step.x
+	warrior.y = step.y
+	warrior.moves_left = warrior.max_moves
+	win_session.world.current_player_id = 2
+	win_session.world.recompute_visibility(2)
+	var win_actions: Array = RuleBrain.new().compute_actions(win_session.snapshot_for(2))
+	var attacked := false
+	for action in win_actions:
+		if str(action.get("type", "")) == "attack_city" and int(action.get("city_id", -1)) == prey.id:
+			attacked = true
+	_expect(failures, attacked, "RuleBrain attacks a city it should take")
+
+	var hold_session := CrownMatch.new()
+	hold_session.new_game(20260815, false)
+	var hsite := _first_land(hold_session.world, 7, 7)
+	var rsite := _land_away(hold_session.world, hsite.x, hsite.y, Defs.CITY_MIN_DISTANCE)
+	for unit_variant in hold_session.world.units.duplicate():
+		hold_session.world.remove_unit(unit_variant)
+	var strong: GameWorld.City = hold_session.world.add_city(1, hsite.x, hsite.y, "Thornwatch")
+	hold_session.world.add_city(2, rsite.x, rsite.y, "Gloamrest")
+	var tile: GameWorld.Tile = hold_session.world.tile_at(strong.x, strong.y)
+	tile.terrain = "hills"
+	strong.culture_total = 12
+	hold_session.world.recompute_culture_borders()
+	var guard: GameWorld.Unit = hold_session.world.spawn_unit("warrior", strong.x, strong.y, 1)
+	if guard:
+		guard.x = strong.x
+		guard.y = strong.y
+	var adj := _land_near(hold_session.world, strong.x, strong.y, 1)
+	var siege: GameWorld.Unit = hold_session.world.spawn_unit("warrior", adj.x, adj.y, 2)
+	if siege == null:
+		_expect(failures, false, "siege-brain: warrior")
+		return
+	siege.x = adj.x
+	siege.y = adj.y
+	siege.moves_left = siege.max_moves
+	hold_session.world.current_player_id = 2
+	hold_session.world.recompute_visibility(2)
+	_expect(failures, hold_session.world.city_defense(strong) >= siege.strength, "strong city out-defends a warrior")
+	var hold_actions: Array = RuleBrain.new().compute_actions(hold_session.snapshot_for(2))
+	var suicided := false
+	for action in hold_actions:
+		if str(action.get("type", "")) == "attack_city":
+			suicided = true
+	_expect(failures, not suicided, "RuleBrain does not suicide into a strong garrison")
+
+	var faith_session := CrownMatch.new()
+	faith_session.new_game(20260815, false)
+	var ai_settler: Variant = _first_of_type(faith_session, 2, "settler")
+	if ai_settler == null:
+		_expect(failures, false, "faith-brain: settler")
+		return
+	faith_session.world.current_player_id = 2
+	if not faith_session.world.is_settleable(ai_settler.x, ai_settler.y):
+		var settle := _nearest_settle(faith_session, ai_settler)
+		if settle != Vector2i(-1, -1):
+			faith_session.rules.apply(faith_session.world, {"type": "move_unit", "unit_id": ai_settler.id, "to": {"x": settle.x, "y": settle.y}})
+			ai_settler = faith_session.world.get_unit(ai_settler.id)
+	faith_session.rules.apply(faith_session.world, {"type": "found_city", "unit_id": ai_settler.id})
+	var ai_player: GameWorld.Player = faith_session.world.get_player(2)
+	ai_player.culture = Defs.FAITH_FOUND_CULTURE
+	var faith_actions: Array = RuleBrain.new().compute_actions(faith_session.snapshot_for(2))
+	var founded_ai := false
+	for action in faith_actions:
+		if str(action.get("type", "")) == "found_religion":
+			founded_ai = true
+	_expect(failures, founded_ai, "RuleBrain founds a faith when the threshold is met")
+
+
 func _has_illegal_emit(session: CrownMatch) -> bool:
 	for action in session.last_ai_actions:
 		var kind := str(action.get("type", ""))
-		if kind not in ["move_unit", "attack", "found_city", "set_production", "work_tile", "build_improvement", "build_route", "research", "end_turn"]:
+		if kind not in ["move_unit", "attack", "attack_city", "found_city", "set_production", "work_tile", "build_improvement", "build_route", "research", "found_religion", "adopt_religion", "end_turn"]:
 			return true
 	return false
 

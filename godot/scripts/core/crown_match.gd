@@ -27,6 +27,43 @@ func new_game(seed_value: int, use_http: bool = false, http_url: String = "") ->
 	brain = _make_brain(use_http, http_url)
 
 
+static func has_save(path: String = "") -> bool:
+	var dest: String = path if path != "" else Defs.SAVE_PATH
+	return FileAccess.file_exists(dest)
+
+
+func save_game(path: String = "") -> bool:
+	if world == null:
+		return false
+	var dest: String = path if path != "" else Defs.SAVE_PATH
+	var file := FileAccess.open(dest, FileAccess.WRITE)
+	if file == null:
+		return false
+	file.store_string(JSON.stringify(world.to_dict(), "\t"))
+	file.close()
+	return true
+
+
+func load_game(path: String = "") -> bool:
+	var dest: String = path if path != "" else Defs.SAVE_PATH
+	if not FileAccess.file_exists(dest):
+		return false
+	var text := FileAccess.get_file_as_string(dest)
+	var parsed: Variant = JSON.parse_string(text)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return false
+	world = GameWorld.new()
+	world.from_dict(parsed)
+	world.recompute_culture_borders()
+	rules = RulesEngine.new()
+	if brain == null:
+		brain = RuleBrain.new()
+	ai_waiting = false
+	last_ai_actions = []
+	last_rejected = PackedStringArray()
+	return true
+
+
 func configure_brain(use_http: bool, http_url: String = "") -> void:
 	brain = _make_brain(use_http, http_url)
 
@@ -68,6 +105,8 @@ func snapshot_for(player_id: int) -> Dictionary:
 
 
 func submit(action: Dictionary) -> Dictionary:
+	if world.game_over:
+		return {"ok": false, "error": "game_over", "message": ""}
 	if world.current_player_id != HUMAN_ID and not bool(action.get("_system", false)):
 		return {"ok": false, "error": "not_human_turn", "message": ""}
 	var result := rules.apply(world, action)
@@ -89,11 +128,19 @@ func end_human_turn() -> PackedStringArray:
 
 func begin_end_human_turn() -> PackedStringArray:
 	_turn_notes = PackedStringArray()
+	if world.game_over:
+		_turn_notes.append("The match is over.")
+		ai_waiting = false
+		return _turn_notes
 	if world.current_player_id != HUMAN_ID:
 		_turn_notes.append("It is not your turn.")
 		ai_waiting = false
 		return _turn_notes
 	_finish_player_turn(HUMAN_ID, _turn_notes)
+	if world.game_over:
+		ai_waiting = false
+		save_game()
+		return _turn_notes
 	world.current_player_id = AI_ID
 	rules.refresh_moves(world, AI_ID)
 	world.log_event("The Vesper Compact weighs the field.")
@@ -117,14 +164,22 @@ func poll_end_turn() -> Dictionary:
 		return {"done": false, "notes": _turn_notes}
 	if typeof(decided) != TYPE_ARRAY:
 		decided = []
-	_apply_ai_actions(decided)
-	_finish_player_turn(AI_ID, _turn_notes)
+	if not world.game_over:
+		_apply_ai_actions(decided)
+	if not world.game_over:
+		_finish_player_turn(AI_ID, _turn_notes)
 	world.turn_number += 1
+	rules.evaluate_victory(world)
+	if world.game_over:
+		ai_waiting = false
+		save_game()
+		return {"done": true, "notes": _turn_notes}
 	world.current_player_id = HUMAN_ID
 	rules.refresh_moves(world, HUMAN_ID)
 	world.log_event("Turn %d begins for the Alden Host." % world.turn_number)
 	_turn_notes.append("Turn %d begins for the Alden Host." % world.turn_number)
 	ai_waiting = false
+	save_game()
 	return {"done": true, "notes": _turn_notes}
 
 
@@ -137,6 +192,8 @@ func _finish_player_turn(player_id: int, notes: PackedStringArray) -> void:
 
 func _apply_ai_actions(decided: Array) -> void:
 	last_ai_actions = decided
+	if world.game_over:
+		return
 	var applied := 0
 	for raw in decided:
 		if applied >= Defs.MAX_AI_ACTIONS:

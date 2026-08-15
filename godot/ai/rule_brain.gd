@@ -3,18 +3,23 @@ extends AiBrain
 
 ## Policy a later LLM adapter can mimic (only emit from legal_actions):
 ## 1. Research the next useful craft (Delving, Skyfletch, Ashlar).
-## 2. Found a city on the best legal site; prefer own or adjacent culture.
-## 3. Laborers: improve or road the current tile, else walk to a high-value
-##    owned tile that still needs work. Do not leave laborers idle.
-## 4. Defend: if a city has no combat unit within 1 and a rival is visible
+## 2. Found a faith if the threshold is met; adopt the faith this host
+##    founded, else the one present in most of its cities.
+## 3. Found a city on the best legal site; prefer own or adjacent culture.
+## 4. Laborers: improve or road the current tile, else walk to a high-value
+##    owned tile that still needs work. Prefer roads that help a faith travel.
+## 5. Defend: if a city has no combat unit within 1 and a rival is visible
 ##    (or the city is empty), walk the nearest combat unit home.
-## 5. Escort: never walk a settler onto a tile adjacent to a visible rival
+## 6. Escort: never walk a settler onto a tile adjacent to a visible rival
 ##    combat unit unless a friendly combat unit is also adjacent.
-## 6. Remaining combat: one explores fog; extras hunt visible rivals.
-## 7. Production: warrior/bowman if threatened; worker after the first city;
-##    settler before a second city; otherwise combat. Never endless warriors
-##    while the hinterland is still unclaimed.
-## 8. Work the best owned adjacent tile. End turn.
+## 7. Attack a rival city only when strength beats its defense. Otherwise
+##    approach / siege. Do not suicide into a strong garrison.
+## 8. Remaining combat: walk toward a visible rival city; else one explores
+##    fog and extras hunt visible rivals.
+## 9. Production: warrior/bowman if a rival city or threat is visible;
+##    worker after the first city; settler before a second city; otherwise
+##    combat. Never endless warriors while the hinterland is still unclaimed.
+## 10. Work the best owned adjacent tile. End turn.
 
 
 func compute_actions(state: Dictionary) -> Array:
@@ -26,10 +31,23 @@ func compute_actions(state: Dictionary) -> Array:
 	if not research.is_empty():
 		chosen.append(research)
 
+	var found_faith := _pick_found_religion(legal)
+	if not found_faith.is_empty():
+		chosen.append(found_faith)
+
+	var adopt := _pick_adopt_religion(state, legal)
+	if not adopt.is_empty():
+		chosen.append(adopt)
+
 	var found := _pick_found(state, legal)
 	if not found.is_empty():
 		chosen.append(found)
 		used_units[int(found.get("unit_id", -1))] = true
+
+	for action in _of_type(legal, "attack_city"):
+		if _should_attack_city(state, action):
+			chosen.append(action)
+			used_units[int(action.get("unit_id", -1))] = true
 
 	for action in _of_type(legal, "attack"):
 		if _should_attack(state, action):
@@ -179,6 +197,52 @@ func _should_attack(state: Dictionary, action: Dictionary) -> bool:
 	return int(attacker.get("strength", 0)) >= int(defender.get("strength", 0))
 
 
+func _should_attack_city(state: Dictionary, action: Dictionary) -> bool:
+	var attacker := _unit(state, int(action.get("unit_id", -1)))
+	var city := _city(state, int(action.get("city_id", -1)))
+	if attacker.is_empty() or city.is_empty():
+		return false
+	return int(attacker.get("strength", 0)) > int(city.get("defense", 99))
+
+
+func _pick_found_religion(legal: Array) -> Dictionary:
+	var options := _of_type(legal, "found_religion")
+	if options.is_empty():
+		return {}
+	return options[0]
+
+
+func _pick_adopt_religion(state: Dictionary, legal: Array) -> Dictionary:
+	var options := _of_type(legal, "adopt_religion")
+	if options.is_empty():
+		return {}
+	var preferred := _preferred_faith(state)
+	for action in options:
+		if str(action.get("religion_id", "")) == preferred:
+			return action
+	return options[0]
+
+
+func _preferred_faith(state: Dictionary) -> String:
+	var you := _you(state)
+	var faiths: Dictionary = state.get("faiths", {})
+	for entry in faiths.get("founded", []):
+		if int(entry.get("founder_id", -1)) == you:
+			return str(entry.get("id", ""))
+	var counts: Dictionary = {}
+	for city in _own_cities(state):
+		for faith in city.get("religions", []):
+			var key := str(faith)
+			counts[key] = int(counts.get(key, 0)) + 1
+	var best := ""
+	var best_n := 0
+	for key in counts.keys():
+		if int(counts[key]) > best_n:
+			best_n = int(counts[key])
+			best = str(key)
+	return best
+
+
 func _worker_builds(state: Dictionary, legal: Array, used_units: Dictionary) -> Array:
 	var out: Array = []
 	for action in _of_type(legal, "build_improvement"):
@@ -326,6 +390,8 @@ func _best_improve_target(state: Dictionary) -> Vector2i:
 	var you := _you(state)
 	var best := Vector2i(-1, -1)
 	var best_score := -1
+	var faith := str(state.get("hooks", {}).get("state_religion", ""))
+	var need_spread := _city_missing_faith(state, faith)
 	for tile in state.get("tiles", []):
 		if int(tile.get("culture_owner_id", -1)) != you:
 			continue
@@ -335,10 +401,23 @@ func _best_improve_target(state: Dictionary) -> Vector2i:
 		var score: int = int(yld.get("food", 0)) + int(yld.get("production", 0)) * 2 + int(yld.get("gold", 0))
 		if str(tile.get("improvement", "")) == "":
 			score += 4
+		if str(tile.get("route", "")) != "road" and need_spread != Vector2i(-1, -1):
+			var nearer := maxi(absi(int(tile.get("x", 0)) - need_spread.x), absi(int(tile.get("y", 0)) - need_spread.y))
+			score += maxi(0, 6 - nearer)
 		if score > best_score:
 			best_score = score
 			best = Vector2i(int(tile.get("x", 0)), int(tile.get("y", 0)))
 	return best
+
+
+func _city_missing_faith(state: Dictionary, faith: String) -> Vector2i:
+	if faith == "":
+		return Vector2i(-1, -1)
+	for city in _own_cities(state):
+		var rels: Array = city.get("religions", [])
+		if not rels.has(faith):
+			return Vector2i(int(city.get("x", 0)), int(city.get("y", 0)))
+	return Vector2i(-1, -1)
 
 
 func _combat_moves(state: Dictionary, legal: Array, used_units: Dictionary) -> Array:
@@ -348,6 +427,15 @@ func _combat_moves(state: Dictionary, legal: Array, used_units: Dictionary) -> A
 		if _is_combat(unit) and not used_units.get(int(unit.get("id", -1)), false):
 			combat_ids.append(int(unit.get("id", -1)))
 	if combat_ids.is_empty():
+		return out
+	var siege := _nearest_rival_city(state)
+	if not siege.is_empty():
+		for unit_id_variant in combat_ids:
+			var unit_id: int = int(unit_id_variant)
+			var step := _best_move_toward(legal, unit_id, int(siege.get("x", 0)), int(siege.get("y", 0)))
+			if not step.is_empty():
+				out.append(step)
+				used_units[unit_id] = true
 		return out
 	var explorer_id: int = int(combat_ids[0])
 	var fog := _nearest_unexplored_edge(state, _unit(state, explorer_id))
@@ -366,6 +454,26 @@ func _combat_moves(state: Dictionary, legal: Array, used_units: Dictionary) -> A
 			out.append(hunt)
 			used_units[unit_id] = true
 	return out
+
+
+func _nearest_rival_city(state: Dictionary) -> Dictionary:
+	var you := _you(state)
+	var best := {}
+	var best_d := 999
+	var from := _own_units(state)
+	var ox := 0
+	var oy := 0
+	if not from.is_empty():
+		ox = int(from[0].get("x", 0))
+		oy = int(from[0].get("y", 0))
+	for city in state.get("cities", []):
+		if int(city.get("owner_id", -1)) == you:
+			continue
+		var d := maxi(absi(ox - int(city.get("x", 0))), absi(oy - int(city.get("y", 0))))
+		if d < best_d:
+			best_d = d
+			best = city
+	return best
 
 
 func _best_move_toward(legal: Array, unit_id: int, tx: int, ty: int) -> Dictionary:
@@ -444,7 +552,7 @@ func _best_production(state: Dictionary, legal: Array) -> Array:
 			own_workers += 1
 		elif _is_combat(unit):
 			own_combat += 1
-	var threatened := _visible_rival_combat(state)
+	var threatened := _visible_rival_combat(state) or not _nearest_rival_city(state).is_empty()
 	var want := "warrior"
 	var techs: Dictionary = state.get("techs", {})
 	var researched: Array = techs.get("researched", [])

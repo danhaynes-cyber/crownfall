@@ -64,6 +64,7 @@ class Player:
 	var researched: Array = []
 	var researching: String = ""
 	var research_progress: int = 0
+	var ever_founded: bool = false
 
 
 var width: int = Defs.MAP_W
@@ -78,6 +79,11 @@ var units: Array = []
 var cities: Array = []
 var players: Array = []
 var event_log: PackedStringArray = PackedStringArray()
+var founded_faiths: Array = []
+var game_over: bool = false
+var winner_id: int = -1
+var victory_kind: String = ""
+var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 
 func setup_players() -> void:
@@ -134,6 +140,14 @@ func unit_at(x: int, y: int) -> Unit:
 		if u.x == x and u.y == y:
 			return u
 	return null
+
+
+func units_at(x: int, y: int) -> Array:
+	var out: Array = []
+	for u in units:
+		if u.x == x and u.y == y:
+			out.append(u)
+	return out
 
 
 func city_at(x: int, y: int) -> City:
@@ -217,6 +231,9 @@ func add_city(owner_id: int, x: int, y: int, city_name: String) -> City:
 	c.population = 1
 	c.worked.append(Vector2i(x, y))
 	cities.append(c)
+	var owner := get_player(owner_id)
+	if owner:
+		owner.ever_founded = true
 	recompute_culture_borders()
 	auto_assign_work(c)
 	return c
@@ -369,12 +386,18 @@ func city_yields(city: City) -> Dictionary:
 		food += int(y.get("food", 0))
 		production += int(y.get("production", 0))
 		gold += int(y.get("gold", 0))
+	var science := 1
+	var culture := 1
+	var owner := get_player(city.owner_id)
+	if owner and owner.state_religion != "" and city.religions.has(owner.state_religion):
+		gold += 1
+		culture += 1
 	return {
 		"food": food,
 		"production": maxi(production, 1),
 		"gold": gold,
-		"science": 1,
-		"culture": 1,
+		"science": science,
+		"culture": culture,
 	}
 
 
@@ -491,3 +514,271 @@ func log_event(text: String) -> void:
 	event_log.append(text)
 	if event_log.size() > 40:
 		event_log = event_log.slice(event_log.size() - 40)
+
+
+func garrison_units(city: City) -> Array:
+	var out: Array = []
+	for unit_variant in units:
+		var unit: Unit = unit_variant
+		if unit.x == city.x and unit.y == city.y and unit.owner_id == city.owner_id and Defs.is_combat(unit.unit_type):
+			out.append(unit)
+	return out
+
+
+func garrison_count(city: City) -> int:
+	return garrison_units(city).size()
+
+
+func city_defense(city: City) -> int:
+	var defense := 0
+	for unit_variant in garrison_units(city):
+		var unit: Unit = unit_variant
+		defense += unit.strength
+	defense = maxi(defense, 1)
+	var tile := tile_at(city.x, city.y)
+	if tile != null and (tile.terrain == "hills" or tile.terrain == "forest"):
+		defense += 1
+	if city.border_radius >= 2:
+		defense += 1
+	return defense
+
+
+func founded_faith_ids() -> Array:
+	var ids: Array = []
+	for entry in founded_faiths:
+		ids.append(str(entry.get("id", "")))
+	return ids
+
+
+func is_faith_founded(faith_id: String) -> bool:
+	return founded_faith_ids().has(faith_id)
+
+
+func host_still_contending(player_id: int) -> bool:
+	if cities_of(player_id).size() > 0:
+		return true
+	var player := get_player(player_id)
+	if player != null and not player.ever_founded and units_of(player_id).size() > 0:
+		return true
+	return false
+
+
+func victory_score(player_id: int) -> int:
+	var player := get_player(player_id)
+	if player == null:
+		return 0
+	var pop := 0
+	for city_variant in cities_of(player_id):
+		var city: City = city_variant
+		pop += city.population
+	return cities_of(player_id).size() * 20 + pop * 5 + player.culture + player.researched.size() * 8 + int(player.gold / 2)
+
+
+func victory_scorecard() -> Array:
+	var out: Array = []
+	for player_variant in players:
+		var player: Player = player_variant
+		out.append({
+			"player_id": player.id,
+			"name": player.display_name,
+			"cities": cities_of(player.id).size(),
+			"population": _population_of(player.id),
+			"culture": player.culture,
+			"techs": player.researched.size(),
+			"gold": player.gold,
+			"total": victory_score(player.id),
+		})
+	return out
+
+
+func _population_of(player_id: int) -> int:
+	var pop := 0
+	for city_variant in cities_of(player_id):
+		var city: City = city_variant
+		pop += city.population
+	return pop
+
+
+func declare_victory(player_id: int, kind: String) -> void:
+	game_over = true
+	winner_id = player_id
+	victory_kind = kind
+
+
+func to_dict() -> Dictionary:
+	var tile_rows: Array = []
+	for tile_variant in tiles:
+		var tile: Tile = tile_variant
+		tile_rows.append({
+			"x": tile.x,
+			"y": tile.y,
+			"terrain": tile.terrain,
+			"has_river": tile.has_river,
+			"resource": tile.resource,
+			"improvement": tile.improvement,
+			"route": tile.route,
+			"culture_owner_id": tile.culture_owner_id,
+		})
+	var unit_rows: Array = []
+	for unit_variant in units:
+		var unit: Unit = unit_variant
+		unit_rows.append({
+			"id": unit.id,
+			"owner_id": unit.owner_id,
+			"unit_type": unit.unit_type,
+			"x": unit.x,
+			"y": unit.y,
+			"strength": unit.strength,
+			"hp": unit.hp,
+			"max_hp": unit.max_hp,
+			"moves_left": unit.moves_left,
+			"max_moves": unit.max_moves,
+		})
+	var city_rows: Array = []
+	for city_variant in cities:
+		var city: City = city_variant
+		var worked: Array = []
+		for w in city.worked:
+			worked.append({"x": w.x, "y": w.y})
+		city_rows.append({
+			"id": city.id,
+			"owner_id": city.owner_id,
+			"name": city.name,
+			"x": city.x,
+			"y": city.y,
+			"population": city.population,
+			"stored_food": city.stored_food,
+			"stored_production": city.stored_production,
+			"production_type": city.production_type,
+			"worked": worked,
+			"culture_total": city.culture_total,
+			"border_radius": city.border_radius,
+			"religions": city.religions.duplicate(),
+		})
+	var player_rows: Array = []
+	for player_variant in players:
+		var player: Player = player_variant
+		player_rows.append({
+			"id": player.id,
+			"display_name": player.display_name,
+			"short_name": player.short_name,
+			"is_human": player.is_human,
+			"color": {"r": player.color.r, "g": player.color.g, "b": player.color.b},
+			"gold": player.gold,
+			"science": player.science,
+			"culture": player.culture,
+			"explored": player.explored.keys(),
+			"state_religion": player.state_religion,
+			"researched": player.researched.duplicate(),
+			"researching": player.researching,
+			"research_progress": player.research_progress,
+			"ever_founded": player.ever_founded,
+		})
+	return {
+		"protocol_version": Defs.PROTOCOL_VERSION,
+		"width": width,
+		"height": height,
+		"seed_value": seed_value,
+		"turn_number": turn_number,
+		"current_player_id": current_player_id,
+		"next_unit_id": next_unit_id,
+		"next_city_id": next_city_id,
+		"tiles": tile_rows,
+		"units": unit_rows,
+		"cities": city_rows,
+		"players": player_rows,
+		"event_log": Array(event_log),
+		"founded_faiths": founded_faiths.duplicate(true),
+		"game_over": game_over,
+		"winner_id": winner_id,
+		"victory_kind": victory_kind,
+	}
+
+
+func from_dict(data: Dictionary) -> void:
+	width = int(data.get("width", Defs.MAP_W))
+	height = int(data.get("height", Defs.MAP_H))
+	seed_value = int(data.get("seed_value", 0))
+	turn_number = int(data.get("turn_number", 1))
+	current_player_id = int(data.get("current_player_id", 1))
+	next_unit_id = int(data.get("next_unit_id", 1))
+	next_city_id = int(data.get("next_city_id", 1))
+	game_over = bool(data.get("game_over", false))
+	winner_id = int(data.get("winner_id", -1))
+	victory_kind = str(data.get("victory_kind", ""))
+	rng.seed = seed_value
+	founded_faiths = data.get("founded_faiths", []).duplicate(true)
+	event_log = PackedStringArray()
+	for line in data.get("event_log", []):
+		event_log.append(str(line))
+	tiles.clear()
+	tiles.resize(width * height)
+	for row in data.get("tiles", []):
+		var tile := Tile.new()
+		tile.x = int(row.get("x", 0))
+		tile.y = int(row.get("y", 0))
+		tile.terrain = str(row.get("terrain", "grass"))
+		tile.has_river = bool(row.get("has_river", false))
+		tile.resource = str(row.get("resource", ""))
+		tile.improvement = str(row.get("improvement", ""))
+		tile.route = str(row.get("route", ""))
+		tile.culture_owner_id = int(row.get("culture_owner_id", -1))
+		if in_bounds(tile.x, tile.y):
+			tiles[tile.y * width + tile.x] = tile
+	units.clear()
+	for row in data.get("units", []):
+		var unit := Unit.new()
+		unit.id = int(row.get("id", 0))
+		unit.owner_id = int(row.get("owner_id", 0))
+		unit.unit_type = str(row.get("unit_type", "warrior"))
+		unit.x = int(row.get("x", 0))
+		unit.y = int(row.get("y", 0))
+		unit.strength = int(row.get("strength", 0))
+		unit.hp = int(row.get("hp", 1))
+		unit.max_hp = int(row.get("max_hp", 1))
+		unit.moves_left = int(row.get("moves_left", 0))
+		unit.max_moves = int(row.get("max_moves", 1))
+		units.append(unit)
+	cities.clear()
+	for row in data.get("cities", []):
+		var city := City.new()
+		city.id = int(row.get("id", 0))
+		city.owner_id = int(row.get("owner_id", 0))
+		city.name = str(row.get("name", ""))
+		city.x = int(row.get("x", 0))
+		city.y = int(row.get("y", 0))
+		city.population = int(row.get("population", 1))
+		city.stored_food = int(row.get("stored_food", 0))
+		city.stored_production = int(row.get("stored_production", 0))
+		city.production_type = str(row.get("production_type", ""))
+		city.culture_total = int(row.get("culture_total", 0))
+		city.border_radius = int(row.get("border_radius", 1))
+		city.religions = row.get("religions", []).duplicate()
+		city.worked.clear()
+		for w in row.get("worked", []):
+			city.worked.append(Vector2i(int(w.get("x", 0)), int(w.get("y", 0))))
+		cities.append(city)
+	players.clear()
+	for row in data.get("players", []):
+		var player := Player.new()
+		player.id = int(row.get("id", 0))
+		player.display_name = str(row.get("display_name", "Host"))
+		player.short_name = str(row.get("short_name", "Host"))
+		player.is_human = bool(row.get("is_human", false))
+		var col: Dictionary = row.get("color", {})
+		player.color = Color(float(col.get("r", 1)), float(col.get("g", 1)), float(col.get("b", 1)))
+		player.gold = int(row.get("gold", 0))
+		player.science = int(row.get("science", 0))
+		player.culture = int(row.get("culture", 0))
+		player.state_religion = str(row.get("state_religion", ""))
+		player.researched = row.get("researched", []).duplicate()
+		player.researching = str(row.get("researching", ""))
+		player.research_progress = int(row.get("research_progress", 0))
+		player.ever_founded = bool(row.get("ever_founded", false))
+		player.explored.clear()
+		for key in row.get("explored", []):
+			player.explored[str(key)] = true
+		players.append(player)
+	for player_variant in players:
+		var player: Player = player_variant
+		recompute_visibility(player.id)

@@ -56,6 +56,8 @@ static func build(world: GameWorld, viewer_id: int, rules: RulesEngine) -> Dicti
 			"population": city.population,
 			"culture_total": city.culture_total,
 			"border_radius": city.border_radius,
+			"defense": world.city_defense(city),
+			"garrison_count": world.garrison_count(city),
 			"specialists": city.assigned_specialists,
 			"religions": city.religions,
 			"corporations": city.corporations,
@@ -121,6 +123,11 @@ static func build(world: GameWorld, viewer_id: int, rules: RulesEngine) -> Dicti
 		"resources": resources,
 		"legal_actions": rules.list_legal_actions(world, viewer_id),
 		"techs": _techs(you),
+		"faiths": _faiths(world, you),
+		"game_over": world.game_over,
+		"winner_id": world.winner_id,
+		"victory_kind": world.victory_kind,
+		"victory_scores": world.victory_scorecard(),
 		"hooks": {
 			"civics": you.civic_ids if you else [],
 			"state_religion": you.state_religion if you else "",
@@ -129,7 +136,7 @@ static func build(world: GameWorld, viewer_id: int, rules: RulesEngine) -> Dicti
 			"vassal_of": you.vassal_of if you else -1,
 			"vassals": you.vassal_ids if you else [],
 			"researched": you.researched.duplicate() if you else [],
-			"note": "Hooks remain for civics, religions, corporations, espionage, vassals, and specialists. Techs are first-class under techs.",
+			"note": "state_religion and city.religions are live. Civics, corporations, espionage, vassals, and specialists remain reserved. Techs are first-class under techs.",
 		},
 	}
 
@@ -155,4 +162,23 @@ static func _techs(you: GameWorld.Player) -> Dictionary:
 		"progress": you.research_progress if you else 0,
 		"available": available,
 		"catalog": catalog,
+	}
+
+
+static func _faiths(world: GameWorld, you: GameWorld.Player) -> Dictionary:
+	var catalog: Array = []
+	for faith_id in Defs.FAITH_ORDER:
+		catalog.append({"id": faith_id, "name": Defs.faith_name(faith_id)})
+	var founded: Array = []
+	for entry in world.founded_faiths:
+		var faith_id := str(entry.get("id", ""))
+		founded.append({
+			"id": faith_id,
+			"name": Defs.faith_name(faith_id),
+			"founder_id": int(entry.get("founder_id", -1)),
+		})
+	return {
+		"catalog": catalog,
+		"founded": founded,
+		"state_religion": you.state_religion if you else "",
 	}

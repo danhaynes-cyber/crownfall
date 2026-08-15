@@ -7,6 +7,7 @@ func generate(world: GameWorld, seed_value: int) -> void:
 	world.width = Defs.MAP_W
 	world.height = Defs.MAP_H
 	world.tiles.resize(world.width * world.height)
+	world.rng.seed = seed_value
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
 	_paint_base(world, rng)
