@@ -823,24 +823,24 @@ func _list_espionage_actions(world: GameWorld, player: GameWorld.Player, actions
 					})
 	var reveal_added := 0
 	for unit_variant in world.units_of(player.id):
-			var unit: GameWorld.Unit = unit_variant
-			for d in Defs.DIRS:
-				var nx: int = unit.x + d.x
-				var ny: int = unit.y + d.y
-				if not world.in_bounds(nx, ny) or world.is_visible(player.id, nx, ny):
-					continue
-				var charge_id := _reveal_charge_rival(world, player.id, nx, ny)
-				if world.spy_points_against(player, charge_id) < Defs.SPY_REVEAL_COST:
-					continue
-				actions.append({
-					"type": "reveal_tile",
-					"tile": {"x": nx, "y": ny},
-					"player_id": charge_id,
-					"cost": Defs.SPY_REVEAL_COST,
-				})
-				reveal_added += 1
-				if reveal_added >= 8:
-					break
+		var unit: GameWorld.Unit = unit_variant
+		for d in Defs.DIRS:
+			var nx: int = unit.x + d.x
+			var ny: int = unit.y + d.y
+			if not world.in_bounds(nx, ny) or world.is_visible(player.id, nx, ny):
+				continue
+			var charge_id := _reveal_charge_rival(world, player.id, nx, ny)
+			if world.spy_points_against(player, charge_id) < Defs.SPY_REVEAL_COST:
+				continue
+			actions.append({
+				"type": "reveal_tile",
+				"tile": {"x": nx, "y": ny},
+				"player_id": charge_id,
+				"cost": Defs.SPY_REVEAL_COST,
+			})
+			reveal_added += 1
+			if reveal_added >= 8:
+				break
 		if reveal_added >= 8:
 			break
 
