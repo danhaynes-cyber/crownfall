@@ -285,6 +285,7 @@ func add_city(owner_id: int, x: int, y: int, city_name: String) -> City:
 		owner.ever_founded = true
 	recompute_culture_borders()
 	auto_assign_work(c)
+	recompute_visibility(owner_id)
 	return c
 
 

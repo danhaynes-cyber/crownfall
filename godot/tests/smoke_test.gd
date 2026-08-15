@@ -821,6 +821,7 @@ func _test_three_hosts_water(failures: PackedStringArray) -> void:
 	_expect(failures, not bool(capture.get("ok", true)), "skiff cannot capture a city")
 	var save_path := "user://crownfall_smoke_three.json"
 	var skiff_id := skiff.id
+	var city_pos := Vector2i(inland.x, inland.y)
 	var skelder_units: int = session.world.units_of(3).size()
 	var explored_before: int = session.world.get_player(1).explored.size()
 	_expect(failures, session.save_game(save_path), "wrote 3-host save")
@@ -833,6 +834,11 @@ func _test_three_hosts_water(failures: PackedStringArray) -> void:
 	_expect(failures, loaded_skiff != null and loaded_skiff.unit_type == "skiff", "save/load keeps the skiff")
 	_expect(failures, loaded.world.units_of(3).size() == skelder_units, "save/load keeps Skelder's units")
 	_expect(failures, loaded.world.get_player(1).explored.size() == explored_before, "save/load keeps explored fog")
+	_expect(failures, loaded.world.is_explored(1, city_pos.x, city_pos.y), "founded city stays explored")
+	_expect(failures, loaded.world.is_visible(1, city_pos.x, city_pos.y), "founded city is visible after load")
+	if loaded_skiff:
+		_expect(failures, loaded.world.is_explored(1, loaded_skiff.x, loaded_skiff.y), "skiff tile stays explored")
+		_expect(failures, loaded.world.is_visible(1, loaded_skiff.x, loaded_skiff.y), "skiff tile is visible after load")
 
 	var three := CrownMatch.new()
 	three.new_game(20260815, false)
@@ -877,7 +883,7 @@ func _test_three_hosts_water(failures: PackedStringArray) -> void:
 
 func _test_hud_and_early_match(failures: PackedStringArray) -> void:
 	var hud := GameHud.new()
-	root.add_child(hud)
+	hud._ready()
 	_expect(failures, hud._found != null, "HUD has Found City")
 	_expect(failures, hud._warrior != null and hud._settler != null and hud._worker != null, "HUD has primary train buttons")
 	_expect(failures, hud._more != null and hud._more_box != null, "HUD parks rare actions behind More")
@@ -886,7 +892,7 @@ func _test_hud_and_early_match(failures: PackedStringArray) -> void:
 	var card := hud._control_card_text()
 	_expect(failures, card.find("Found City") >= 0 and card.find("End Turn") >= 0, "control card names the primary actions")
 	_expect(failures, card.find("WASD") >= 0, "control card names the camera")
-	hud.queue_free()
+	hud.free()
 
 	var play := CrownMatch.new()
 	play.new_game(20260815, false)
