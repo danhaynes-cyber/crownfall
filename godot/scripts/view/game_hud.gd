@@ -9,6 +9,9 @@ signal build_route_pressed
 signal research_pressed(tech_id: String)
 signal found_religion_pressed
 signal adopt_religion_pressed
+signal civic_pressed(category: String, civic_id: String)
+signal specialist_pressed(kind: String)
+signal vassal_pressed
 signal save_pressed
 signal title_pressed
 
@@ -30,6 +33,10 @@ var _road: Button
 var _research_btns: Dictionary = {}
 var _found_faith: Button
 var _adopt_faith: Button
+var _civic_btns: Dictionary = {}
+var _chronicler: Button
+var _wright: Button
+var _vassal: Button
 var _save: Button
 var _end: Button
 var _help: Label
@@ -76,56 +83,66 @@ func _ready() -> void:
 
 	var side_panel := _panel(Color(0.09, 0.08, 0.07, 0.90))
 	side_panel.position = Vector2(1440 - 320, 56)
-	side_panel.size = Vector2(304, 680)
+	side_panel.size = Vector2(304, 760)
 	side_panel.set_anchor(SIDE_RIGHT, 1.0)
 	side_panel.offset_left = -320
 	side_panel.offset_right = -16
 	side_panel.offset_top = 56
-	side_panel.offset_bottom = 736
+	side_panel.offset_bottom = 800
 	root.add_child(side_panel)
 
 	_side = RichTextLabel.new()
 	_side.bbcode_enabled = true
-	_side.position = Vector2(12, 12)
-	_side.size = Vector2(280, 210)
+	_side.position = Vector2(12, 8)
+	_side.size = Vector2(280, 128)
 	_side.fit_content = false
 	_side.scroll_active = true
 	_side.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	side_panel.add_child(_side)
 
-	var y := 228
+	var y := 140
 	_found = _add_btn(side_panel, "Found City", y, func(): found_city_pressed.emit())
-	y += 30
+	y += 24
 	_warrior = _add_btn(side_panel, "Train Warrior", y, func(): produce_pressed.emit("warrior"))
-	y += 30
+	y += 24
 	_settler = _add_btn(side_panel, "Train Settler", y, func(): produce_pressed.emit("settler"))
-	y += 30
+	y += 24
 	_worker = _add_btn(side_panel, "Train Laborer", y, func(): produce_pressed.emit("worker"))
-	y += 30
+	y += 24
 	_bowman = _add_btn(side_panel, "Train Bowman", y, func(): produce_pressed.emit("bowman"))
-	y += 30
+	y += 24
 	_improve = _add_btn(side_panel, "Raise Improvement", y, func(): build_improvement_pressed.emit())
-	y += 30
+	y += 24
 	_road = _add_btn(side_panel, "Cut Road", y, func(): build_route_pressed.emit())
-	y += 34
+	y += 24
 	for tech_id in Defs.TECH_ORDER:
 		var btn := _add_btn(side_panel, "Study %s" % Defs.tech_name(tech_id), y, _research_callback(tech_id))
 		_research_btns[tech_id] = btn
-		y += 26
+		y += 22
 	_found_faith = _add_btn(side_panel, "Found Faith", y, func(): found_religion_pressed.emit())
-	y += 26
+	y += 22
 	_adopt_faith = _add_btn(side_panel, "Adopt Faith", y, func(): adopt_religion_pressed.emit())
-	y += 26
+	y += 22
+	for civic_id in ["high_seat", "free_cantons", "tithe", "open_craft"]:
+		var civic_btn := _add_btn(side_panel, Defs.civic_name(civic_id), y, _civic_callback(civic_id))
+		_civic_btns[civic_id] = civic_btn
+		y += 22
+	_chronicler = _add_btn(side_panel, "Assign Chronicler", y, func(): specialist_pressed.emit("chronicler"))
+	y += 22
+	_wright = _add_btn(side_panel, "Assign Wright", y, func(): specialist_pressed.emit("wright"))
+	y += 22
+	_vassal = _add_btn(side_panel, "Offer the Yoke", y, func(): vassal_pressed.emit())
+	y += 22
 	_save = _add_btn(side_panel, "Save Chronicle", y, func(): save_pressed.emit())
-	y += 28
+	y += 24
 
 	_help = Label.new()
-	_help.position = Vector2(12, y + 4)
-	_help.size = Vector2(280, 86)
+	_help.position = Vector2(12, y + 2)
+	_help.size = Vector2(280, 70)
 	_help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_help.add_theme_color_override("font_color", Color(0.78, 0.72, 0.60))
-	_help.add_theme_font_size_override("font_size", 12)
-	_help.text = "Click an adjacent rival city to assault it. Found a faith at 8 culture or Ashlar. Adopt a state faith. Highest score wins after turn 40 if no host is last standing."
+	_help.add_theme_font_size_override("font_size", 11)
+	_help.text = "Civics: first adopt is free; a switch costs one turn of anarchy. Specialists need pop 2+. Offer the yoke when you hold more cities than a rival."
 	side_panel.add_child(_help)
 
 	_end = Button.new()
@@ -199,6 +216,14 @@ func refresh() -> void:
 			_found_faith.disabled = true
 		if _adopt_faith:
 			_adopt_faith.disabled = true
+		for civic_btn in _civic_btns.values():
+			civic_btn.disabled = true
+		if _chronicler:
+			_chronicler.disabled = true
+		if _wright:
+			_wright.disabled = true
+		if _vassal:
+			_vassal.disabled = true
 		if _save:
 			_save.disabled = true
 		_end.disabled = true
@@ -217,6 +242,13 @@ func refresh() -> void:
 	var faith_label := ""
 	if player and player.state_religion != "":
 		faith_label = "   ·   %s" % Defs.faith_name(player.state_religion)
+	if player and player.anarchy_turns > 0:
+		faith_label += "   ·   Anarchy"
+	if player and not player.civic_ids.is_empty():
+		var civic_names: PackedStringArray = PackedStringArray()
+		for civic_id in player.civic_ids:
+			civic_names.append(Defs.civic_name(str(civic_id)))
+		faith_label += "   ·   %s" % ", ".join(civic_names)
 	_top.text = "Turn %d   ·   %s   ·   Gold %d   Science %d   Culture %d%s%s" % [
 		world.turn_number,
 		player.display_name if player else "Alden Host",
@@ -249,6 +281,9 @@ func refresh() -> void:
 	var my_turn: bool = (not over) and world.current_player_id == CrownMatch.HUMAN_ID and not session.ai_waiting
 	var can_found_faith := false
 	var can_adopt := false
+	var can_vassal := false
+	var legal_civics: Dictionary = {}
+	var legal_specs: Dictionary = {}
 	if session.rules and my_turn:
 		for action in session.rules.list_legal_actions(world, CrownMatch.HUMAN_ID):
 			var kind := str(action.get("type", ""))
@@ -256,10 +291,26 @@ func refresh() -> void:
 				can_found_faith = true
 			elif kind == "adopt_religion":
 				can_adopt = true
+			elif kind == "offer_vassal":
+				can_vassal = true
+			elif kind == "adopt_civic":
+				legal_civics[str(action.get("civic_id", ""))] = true
+			elif kind == "assign_specialist":
+				if int(action.get("city_id", -1)) == selected_city_id:
+					legal_specs[str(action.get("specialist", ""))] = true
 	if _found_faith:
 		_found_faith.disabled = not my_turn or not can_found_faith
 	if _adopt_faith:
 		_adopt_faith.disabled = not my_turn or not can_adopt
+	for civic_id in _civic_btns.keys():
+		var civic_btn: Button = _civic_btns[civic_id]
+		civic_btn.disabled = not my_turn or not bool(legal_civics.get(civic_id, false))
+	if _chronicler:
+		_chronicler.disabled = not my_turn or not bool(legal_specs.get("chronicler", false))
+	if _wright:
+		_wright.disabled = not my_turn or not bool(legal_specs.get("wright", false))
+	if _vassal:
+		_vassal.disabled = not my_turn or not can_vassal
 	if _save:
 		_save.disabled = false
 	for tech_id in _research_btns.keys():
@@ -278,6 +329,14 @@ func refresh() -> void:
 			_improve.disabled = true
 		if _road:
 			_road.disabled = true
+		for civic_btn in _civic_btns.values():
+			civic_btn.disabled = true
+		if _chronicler:
+			_chronicler.disabled = true
+		if _wright:
+			_wright.disabled = true
+		if _vassal:
+			_vassal.disabled = true
 	_log.clear()
 	var start := maxi(0, world.event_log.size() - 8)
 	for i in range(start, world.event_log.size()):
@@ -323,17 +382,35 @@ func _side_text(world: GameWorld) -> String:
 			for faith in city.religions:
 				names.append(Defs.faith_name(str(faith)))
 			faiths = ", ".join(names)
-		bits.append("[b]%s[/b]\nPop %d  Food %d  Prod %d/%s\nYield F%d P%d G%d  Sci %d  Cul %d\nCulture %d  Border %d\nDefense %d  Garrison %d\nFaiths: %s\n" % [
+		var specs := "none"
+		var spec_bits: PackedStringArray = PackedStringArray()
+		for kind in Defs.SPECIALIST_ORDER:
+			var n: int = int(city.assigned_specialists.get(kind, 0))
+			if n > 0:
+				spec_bits.append("%d %s" % [n, Defs.specialist_name(kind)])
+		if not spec_bits.is_empty():
+			specs = ", ".join(spec_bits)
+		bits.append("[b]%s[/b]\nPop %d  Food %d  Prod %d/%s\nYield F%d P%d G%d  Sci %d  Cul %d\nCulture %d  Border %d\nDefense %d  Garrison %d\nFaiths: %s\nSpecialists: %s\n" % [
 			city.name, city.population, city.stored_food, city.stored_production, prod,
 			int(yld.get("food", 0)), int(yld.get("production", 0)), int(yld.get("gold", 0)),
 			int(yld.get("science", 0)), int(yld.get("culture", 0)),
 			city.culture_total, city.border_radius,
 			world.city_defense(city), world.garrison_count(city),
-			faiths,
+			faiths, specs,
 		])
 	var human := session.human() if session else null
 	if human and human.state_religion != "":
 		bits.append("State faith: %s\n" % Defs.faith_name(human.state_religion))
+	if human and not human.civic_ids.is_empty():
+		var civic_bits: PackedStringArray = PackedStringArray()
+		for civic_id in human.civic_ids:
+			civic_bits.append(Defs.civic_name(str(civic_id)))
+		bits.append("Civics: %s\n" % ", ".join(civic_bits))
+	if human and human.vassal_of >= 0:
+		var liege := world.get_player(human.vassal_of)
+		bits.append("Vassal of %s\n" % (liege.display_name if liege else "a host"))
+	elif human and not human.vassal_ids.is_empty():
+		bits.append("Vassals: %d\n" % human.vassal_ids.size())
 	if bits.is_empty():
 		bits.append("[b]The field[/b]\nSelect a unit or city.\nWASD or arrows to pan.\nWheel to zoom. Right-drag to look.")
 	return "\n".join(bits)
@@ -357,11 +434,15 @@ func _research_callback(tech_id: String) -> Callable:
 	return func(): research_pressed.emit(tech_id)
 
 
+func _civic_callback(civic_id: String) -> Callable:
+	return func(): civic_pressed.emit(Defs.civic_category(civic_id), civic_id)
+
+
 func _add_btn(parent: Control, text: String, y: int, cb: Callable) -> Button:
 	var button := Button.new()
 	button.text = text
 	button.position = Vector2(12, y)
-	button.size = Vector2(280, 28)
+	button.size = Vector2(280, 22)
 	_style_button(button)
 	button.pressed.connect(cb)
 	parent.add_child(button)

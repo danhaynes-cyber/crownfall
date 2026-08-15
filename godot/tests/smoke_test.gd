@@ -37,9 +37,10 @@ func _run(failures: PackedStringArray) -> void:
 	_expect(failures, rivers > 0, "river overlay present")
 
 	var snap := session.snapshot_for(1)
-	for key in ["protocol_version", "tiles", "units", "cities", "resources", "scores", "legal_actions", "economy", "hooks", "techs", "faiths", "game_over", "winner_id", "victory_kind", "victory_scores"]:
+	for key in ["protocol_version", "tiles", "units", "cities", "resources", "scores", "legal_actions", "economy", "hooks", "techs", "faiths", "civics", "game_over", "winner_id", "victory_kind", "victory_scores"]:
 		_expect(failures, snap.has(key), "snapshot has %s" % key)
 	_expect(failures, snap["hooks"].has("state_religion"), "hooks.state_religion present")
+	_expect(failures, snap["hooks"].has("civics") and snap["hooks"].has("vassal_of") and snap["hooks"].has("vassals"), "hooks civics and vassals present")
 	_expect(failures, bool(snap.get("game_over", true)) == false, "new match is not over")
 	_expect(failures, snap["legal_actions"] is Array and snap["legal_actions"].size() > 0, "legal actions listed")
 	_expect(failures, snap["hooks"].has("civics"), "civics hook")
@@ -117,6 +118,7 @@ func _run(failures: PackedStringArray) -> void:
 	_test_rulebrain_escort(failures)
 	_test_capture_faith_victory_save(failures)
 	_test_rulebrain_city_and_faith(failures)
+	_test_civics_specialists_vassals(failures)
 
 
 func _test_culture_expands(failures: PackedStringArray, session: CrownMatch, city: GameWorld.City) -> void:
@@ -486,10 +488,153 @@ func _test_rulebrain_city_and_faith(failures: PackedStringArray) -> void:
 	_expect(failures, founded_ai, "RuleBrain founds a faith when the threshold is met")
 
 
+func _test_civics_specialists_vassals(failures: PackedStringArray) -> void:
+	var session := CrownMatch.new()
+	session.new_game(20260815, false)
+	var site := _first_land(session.world, 5, 5)
+	for unit_variant in session.world.units.duplicate():
+		session.world.remove_unit(unit_variant)
+	var city: GameWorld.City = session.world.add_city(1, site.x, site.y, "Goldensill")
+	session.world.current_player_id = 1
+	var before_prod: int = int(session.world.city_yields(city).get("production", 0))
+	var adopted := session.submit({"type": "adopt_civic", "category": "crown", "civic_id": "high_seat"})
+	_expect(failures, bool(adopted.get("ok", false)), "first civic adopt is free: %s" % str(adopted.get("error", adopted.get("message", ""))))
+	_expect(failures, session.human().civic_ids.has("high_seat"), "hooks civic High Seat stored")
+	_expect(failures, session.human().anarchy_turns == 0, "first adopt causes no anarchy")
+	_expect(failures, int(session.world.city_yields(city).get("production", 0)) >= before_prod + 2, "High Seat raises capital production")
+	var snap := session.snapshot_for(1)
+	_expect(failures, snap.get("hooks", {}).get("civics", []).has("high_seat"), "hooks.civics is live")
+	var switched := session.submit({"type": "adopt_civic", "category": "crown", "civic_id": "free_cantons"})
+	_expect(failures, bool(switched.get("ok", false)), "civic switch allowed")
+	_expect(failures, session.human().anarchy_turns == 1, "switch costs one turn of anarchy")
+	city.production_type = "warrior"
+	city.stored_production = 10
+	var units_before: int = session.world.units_of(1).size()
+	session.rules.process_economy(session.world, 1)
+	_expect(failures, session.world.units_of(1).size() == units_before, "anarchy blocks city production")
+	_expect(failures, session.human().anarchy_turns == 0, "anarchy clears after the turn")
+
+	city.population = 2
+	session.world.refresh_specialist_slots(city)
+	var culture_before: int = int(session.world.city_yields(city).get("culture", 0))
+	var assigned := session.submit({"type": "assign_specialist", "city_id": city.id, "specialist": "chronicler", "count": 1})
+	_expect(failures, bool(assigned.get("ok", false)), "assign chronicler: %s" % str(assigned.get("error", assigned.get("message", ""))))
+	_expect(failures, int(city.assigned_specialists.get("chronicler", 0)) == 1, "chronicler assigned")
+	_expect(failures, int(session.world.city_yields(city).get("culture", 0)) >= culture_before + 2, "chronicler raises culture")
+	var city_snap: Dictionary = {}
+	for entry in session.snapshot_for(1).get("cities", []):
+		if int(entry.get("id", -1)) == city.id:
+			city_snap = entry
+	_expect(failures, city_snap.has("specialist_slots") and city_snap.has("assigned_specialists"), "snapshot specialists live")
+
+	var vassal_session := CrownMatch.new()
+	vassal_session.new_game(20260815, false)
+	var a := _first_land(vassal_session.world, 4, 4)
+	var b := _land_away(vassal_session.world, a.x, a.y, Defs.CITY_MIN_DISTANCE)
+	var c := _land_away_from(vassal_session.world, [a, b], Defs.CITY_MIN_DISTANCE)
+	for unit_variant in vassal_session.world.units.duplicate():
+		vassal_session.world.remove_unit(unit_variant)
+	vassal_session.world.add_city(1, a.x, a.y, "Dawnmere")
+	var take: GameWorld.City = vassal_session.world.add_city(2, b.x, b.y, "Nightwell")
+	vassal_session.world.add_city(2, c.x, c.y, "Ashfen")
+	var take_tile: GameWorld.Tile = vassal_session.world.tile_at(take.x, take.y)
+	take_tile.terrain = "grass"
+	take.culture_total = 0
+	take.border_radius = 1
+	var step := _land_near(vassal_session.world, take.x, take.y, 1)
+	var blocker: GameWorld.Unit = vassal_session.world.unit_at(step.x, step.y)
+	if blocker:
+		vassal_session.world.remove_unit(blocker)
+	var bow: GameWorld.Unit = vassal_session.world.spawn_unit("bowman", step.x, step.y, 1)
+	_expect(failures, bow != null, "vassal scenario: bowman")
+	if bow == null:
+		return
+	bow.x = step.x
+	bow.y = step.y
+	bow.moves_left = bow.max_moves
+	vassal_session.world.current_player_id = 1
+	vassal_session.world.recompute_visibility(1)
+	var seized := vassal_session.submit({"type": "attack_city", "unit_id": bow.id, "city_id": take.id})
+	_expect(failures, bool(seized.get("ok", false)), "captured one of two rival cities")
+	_expect(failures, vassal_session.world.cities_of(2).size() == 1, "loser still has a city")
+	_expect(failures, not vassal_session.world.game_over, "capture of one city is not yet domination")
+	var offered := vassal_session.submit({"type": "offer_vassal", "player_id": 2})
+	_expect(failures, bool(offered.get("ok", false)), "offer_vassal accepted: %s" % str(offered.get("error", offered.get("message", ""))))
+	_expect(failures, vassal_session.world.get_player(2).vassal_of == 1, "loser is a vassal")
+	_expect(failures, vassal_session.world.get_player(1).vassal_ids.has(2), "liege lists the vassal")
+	_expect(failures, vassal_session.world.cities_of(2).size() == 1, "vassal keeps its remaining city")
+	_expect(failures, vassal_session.world.game_over, "domination counts liege + vassals as last standing")
+	_expect(failures, vassal_session.world.winner_id == 1, "liege wins domination via vassalage")
+	var vsnap := vassal_session.snapshot_for(1)
+	_expect(failures, int(vsnap.get("hooks", {}).get("vassal_of", 0)) == -1, "liege hooks.vassal_of")
+	_expect(failures, vsnap.get("hooks", {}).get("vassals", []).has(2), "hooks.vassals lists the Compact")
+	var saw_rel := false
+	for score in vsnap.get("scores", []):
+		if int(score.get("player_id", -1)) == 2 and int(score.get("vassal_of", -1)) == 1:
+			saw_rel = true
+	_expect(failures, saw_rel, "scores show vassal relationship")
+
+	var brain_session := CrownMatch.new()
+	brain_session.new_game(20260815, false)
+	var bsite := _first_land(brain_session.world, 6, 6)
+	var rsite := _land_away(brain_session.world, bsite.x, bsite.y, 2)
+	for unit_variant in brain_session.world.units.duplicate():
+		brain_session.world.remove_unit(unit_variant)
+	brain_session.world.add_city(2, bsite.x, bsite.y, "Vesperhold")
+	var prey: GameWorld.City = brain_session.world.add_city(1, rsite.x, rsite.y, "Hartford")
+	brain_session.world.tile_at(prey.x, prey.y).terrain = "grass"
+	var ai_player: GameWorld.Player = brain_session.world.get_player(2)
+	ai_player.civic_ids = ["high_seat", "open_craft"]
+	brain_session.world.current_player_id = 2
+	brain_session.world.recompute_visibility(2)
+	var actions: Array = RuleBrain.new().compute_actions(brain_session.snapshot_for(2))
+	var thrashed := false
+	for action in actions:
+		if str(action.get("type", "")) == "adopt_civic":
+			thrashed = true
+	_expect(failures, not thrashed, "RuleBrain does not civic-thrash")
+
+	var fresh := CrownMatch.new()
+	fresh.new_game(20260815, false)
+	var fsite := _first_land(fresh.world, 6, 6)
+	for unit_variant in fresh.world.units.duplicate():
+		if unit_variant.owner_id == 2:
+			continue
+		fresh.world.remove_unit(unit_variant)
+	fresh.world.add_city(2, fsite.x, fsite.y, "Duskbarrow")
+	fresh.world.current_player_id = 2
+	fresh.world.recompute_visibility(2)
+	var first_civics: Array = RuleBrain.new().compute_actions(fresh.snapshot_for(2))
+	var civic_picks: Array = []
+	for action in first_civics:
+		if str(action.get("type", "")) == "adopt_civic":
+			civic_picks.append(str(action.get("civic_id", "")))
+	_expect(failures, civic_picks.has("free_cantons") or civic_picks.has("high_seat"), "RuleBrain adopts a Crown civic")
+	_expect(failures, civic_picks.has("open_craft") or civic_picks.has("tithe"), "RuleBrain adopts a Labor civic")
+	_expect(failures, civic_picks.size() <= 2, "RuleBrain adopts at most one civic per category")
+
+
+func _land_away_from(world: GameWorld, points: Array, min_d: int) -> Vector2i:
+	for ty in world.height:
+		for tx in world.width:
+			if not Defs.is_land(world.tile_at(tx, ty).terrain):
+				continue
+			if world.city_at(tx, ty) != null or world.unit_at(tx, ty) != null:
+				continue
+			var far := true
+			for point in points:
+				if Defs.chebyshev(tx, ty, int(point.x), int(point.y)) < min_d:
+					far = false
+					break
+			if far:
+				return Vector2i(tx, ty)
+	return Vector2i(clampi(10, 1, world.width - 2), clampi(10, 1, world.height - 2))
+
+
 func _has_illegal_emit(session: CrownMatch) -> bool:
 	for action in session.last_ai_actions:
 		var kind := str(action.get("type", ""))
-		if kind not in ["move_unit", "attack", "attack_city", "found_city", "set_production", "work_tile", "build_improvement", "build_route", "research", "found_religion", "adopt_religion", "end_turn"]:
+		if kind not in ["move_unit", "attack", "attack_city", "found_city", "set_production", "work_tile", "build_improvement", "build_route", "research", "found_religion", "adopt_religion", "adopt_civic", "assign_specialist", "offer_vassal", "end_turn"]:
 			return true
 	return false
 

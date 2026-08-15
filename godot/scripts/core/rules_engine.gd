@@ -32,6 +32,12 @@ func apply(world: GameWorld, action: Dictionary) -> Dictionary:
 			result = _found_religion(world, action)
 		"adopt_religion":
 			result = _adopt_religion(world, action)
+		"adopt_civic":
+			result = _adopt_civic(world, action)
+		"assign_specialist":
+			result = _assign_specialist(world, action)
+		"offer_vassal":
+			result = _offer_vassal(world, action)
 		"end_turn":
 			result = {"ok": true, "ended": true, "message": ""}
 		_:
@@ -59,6 +65,8 @@ func list_legal_actions(world: GameWorld, player_id: int) -> Array:
 				var foe: GameWorld.Unit = other_variant
 				if foe.owner_id == player_id:
 					continue
+				if not world.is_hostile(player_id, foe.owner_id):
+					continue
 				if Defs.chebyshev(unit.x, unit.y, foe.x, foe.y) <= reach_range:
 					actions.append({
 						"type": "attack",
@@ -68,6 +76,8 @@ func list_legal_actions(world: GameWorld, player_id: int) -> Array:
 			for city_variant in world.cities:
 				var rival: GameWorld.City = city_variant
 				if rival.owner_id == player_id:
+					continue
+				if not world.is_hostile(player_id, rival.owner_id):
 					continue
 				if Defs.chebyshev(unit.x, unit.y, rival.x, rival.y) == 1:
 					actions.append({
@@ -123,6 +133,23 @@ func list_legal_actions(world: GameWorld, player_id: int) -> Array:
 				"city_id": city.id,
 				"tile": {"x": pos.x, "y": pos.y},
 			})
+		world.refresh_specialist_slots(city)
+		var spec_cap: int = int(city.specialist_slots.get("max", 0))
+		if spec_cap > 0:
+			for kind in Defs.SPECIALIST_ORDER:
+				var next_count: int = int(city.assigned_specialists.get(kind, 0)) + 1
+				if world.specialist_count(city) >= spec_cap and int(city.assigned_specialists.get(kind, 0)) >= spec_cap:
+					continue
+				if next_count > spec_cap:
+					continue
+				if world.specialist_count(city) - int(city.assigned_specialists.get(kind, 0)) + next_count > spec_cap:
+					continue
+				actions.append({
+					"type": "assign_specialist",
+					"city_id": city.id,
+					"specialist": kind,
+					"count": next_count,
+				})
 	var researcher: GameWorld.Player = world.get_player(player_id)
 	if researcher:
 		for tech_id in Defs.TECH_ORDER:
@@ -140,6 +167,23 @@ func list_legal_actions(world: GameWorld, player_id: int) -> Array:
 				continue
 			if _can_adopt(world, researcher, str(faith_id)):
 				actions.append({"type": "adopt_religion", "religion_id": faith_id})
+		if researcher.anarchy_turns <= 0:
+			for category in Defs.CIVIC_CATEGORY_ORDER:
+				var current := Defs.civic_in_category(researcher.civic_ids, category)
+				var options: Array = Defs.CIVIC_CATEGORIES.get(category, {}).get("options", [])
+				for civic_id in options:
+					if str(civic_id) == current:
+						continue
+					actions.append({
+						"type": "adopt_civic",
+						"category": category,
+						"civic_id": str(civic_id),
+					})
+		if world.is_sovereign(player_id):
+			for other_variant in world.players:
+				var other: GameWorld.Player = other_variant
+				if _can_offer_vassal(world, researcher, other.id):
+					actions.append({"type": "offer_vassal", "player_id": other.id})
 	actions.append({"type": "end_turn"})
 	return actions
 
@@ -149,13 +193,21 @@ func process_economy(world: GameWorld, player_id: int) -> PackedStringArray:
 	var player := world.get_player(player_id)
 	if player == null:
 		return notes
+	var in_anarchy: bool = player.anarchy_turns > 0
+	if in_anarchy:
+		notes.append("%s is in anarchy; cities raise no hosts." % player.display_name)
+	var gold_earned := 0
+	var science_earned := 0
 	for city_variant in world.cities_of(player_id):
 		var city: GameWorld.City = city_variant
 		var yields: Dictionary = world.city_yields(city)
 		city.stored_food += int(yields.get("food", 0))
-		city.stored_production += int(yields.get("production", 0))
+		if not in_anarchy:
+			city.stored_production += int(yields.get("production", 0))
 		player.gold += int(yields.get("gold", 0))
 		player.science += int(yields.get("science", 0))
+		gold_earned += int(yields.get("gold", 0))
+		science_earned += int(yields.get("science", 0))
 		player.culture += int(yields.get("culture", 0))
 		city.culture_total += int(yields.get("culture", 0))
 		var growth_need: int = 10 + city.population * 5
@@ -164,13 +216,32 @@ func process_economy(world: GameWorld, player_id: int) -> PackedStringArray:
 			city.population += 1
 			world.auto_assign_work(city)
 			notes.append("%s grew to population %d." % [city.name, city.population])
-		if city.production_type != "":
+		if not in_anarchy and city.production_type != "":
 			var cost := Defs.unit_cost(city.production_type)
 			if city.stored_production >= cost:
 				var spawned := world.spawn_unit(city.production_type, city.x, city.y, player_id)
 				if spawned != null:
 					city.stored_production -= cost
 					notes.append("%s completed a %s." % [city.name, city.production_type])
+	if player.vassal_of >= 0:
+		var liege := world.get_player(player.vassal_of)
+		if liege:
+			var tribute_gold: int = (gold_earned * Defs.VASSAL_TRIBUTE_NUM) / Defs.VASSAL_TRIBUTE_DEN
+			var tribute_science: int = (science_earned * Defs.VASSAL_TRIBUTE_NUM) / Defs.VASSAL_TRIBUTE_DEN
+			tribute_gold = mini(player.gold, tribute_gold)
+			tribute_science = mini(player.science, tribute_science)
+			player.gold -= tribute_gold
+			player.science -= tribute_science
+			liege.gold += tribute_gold
+			liege.science += tribute_science
+			if tribute_gold > 0 or tribute_science > 0:
+				notes.append("%s sent tribute to %s (%d gold, %d science)." % [
+					player.short_name, liege.short_name, tribute_gold, tribute_science,
+				])
+	if player.anarchy_turns > 0:
+		player.anarchy_turns -= 1
+		if player.anarchy_turns == 0:
+			notes.append("%s leaves anarchy." % player.display_name)
 	_progress_research(world, player, notes)
 	var old_radius: Dictionary = {}
 	for city_variant in world.cities_of(player_id):
@@ -235,6 +306,8 @@ func _attack(world: GameWorld, action: Dictionary) -> Dictionary:
 		return _fail("not_your_unit")
 	if target.owner_id == unit.owner_id:
 		return _fail("friendly_fire")
+	if not world.is_hostile(unit.owner_id, target.owner_id):
+		return _fail("not_hostile")
 	if unit.strength <= 0:
 		return _fail("cannot_attack")
 	if unit.moves_left < 1:
@@ -443,6 +516,8 @@ func _attack_city(world: GameWorld, action: Dictionary) -> Dictionary:
 		return _fail("not_your_unit")
 	if city.owner_id == unit.owner_id:
 		return _fail("own_city")
+	if not world.is_hostile(unit.owner_id, city.owner_id):
+		return _fail("not_hostile")
 	if unit.strength <= 0:
 		return _fail("cannot_attack")
 	if unit.moves_left < 1:
@@ -574,6 +649,77 @@ func _spread_faiths(world: GameWorld, notes: PackedStringArray) -> void:
 			if world.rng.randf() < chance:
 				dest.religions.append(faith)
 				notes.append("%s reached %s." % [Defs.faith_name(faith), dest.name])
+
+
+func _adopt_civic(world: GameWorld, action: Dictionary) -> Dictionary:
+	var player := world.get_player(world.current_player_id)
+	if player == null:
+		return _fail("unknown_player")
+	if player.anarchy_turns > 0:
+		return _fail("anarchy")
+	var civic_id := str(action.get("civic_id", ""))
+	var category := str(action.get("category", ""))
+	if not Defs.CIVICS.has(civic_id):
+		return _fail("unknown_civic")
+	if Defs.civic_category(civic_id) != category:
+		return _fail("wrong_category")
+	var current := Defs.civic_in_category(player.civic_ids, category)
+	if current == civic_id:
+		return _fail("already_adopted")
+	var next_ids: Array = []
+	for existing in player.civic_ids:
+		if Defs.civic_category(str(existing)) != category:
+			next_ids.append(existing)
+	next_ids.append(civic_id)
+	player.civic_ids = next_ids
+	if current != "":
+		player.anarchy_turns = 1
+		return _ok("%s switched to %s. One turn of anarchy follows." % [player.display_name, Defs.civic_name(civic_id)])
+	return _ok("%s adopted %s." % [player.display_name, Defs.civic_name(civic_id)])
+
+
+func _assign_specialist(world: GameWorld, action: Dictionary) -> Dictionary:
+	var city := world.get_city(int(action.get("city_id", -1)))
+	if city == null:
+		return _fail("unknown_city")
+	if city.owner_id != world.current_player_id:
+		return _fail("not_your_city")
+	var kind := str(action.get("specialist", ""))
+	if not Defs.SPECIALISTS.has(kind):
+		return _fail("unknown_specialist")
+	var count := int(action.get("count", 1))
+	if not world.set_specialist_count(city, kind, count):
+		return _fail("cannot_assign")
+	var have: int = int(city.assigned_specialists.get(kind, 0))
+	return _ok("%s assigned %d %s." % [city.name, have, Defs.specialist_name(kind)])
+
+
+func _can_offer_vassal(world: GameWorld, liege: GameWorld.Player, target_id: int) -> bool:
+	if liege == null:
+		return false
+	if not world.is_sovereign(liege.id) or not world.is_sovereign(target_id):
+		return false
+	if liege.id == target_id:
+		return false
+	if world.cities_of(target_id).is_empty():
+		return false
+	return world.cities_of(liege.id).size() > world.cities_of(target_id).size()
+
+
+func _offer_vassal(world: GameWorld, action: Dictionary) -> Dictionary:
+	var liege := world.get_player(world.current_player_id)
+	if liege == null:
+		return _fail("unknown_player")
+	var target_id := int(action.get("player_id", -1))
+	if not _can_offer_vassal(world, liege, target_id):
+		return _fail("cannot_vassalize")
+	if not world.bind_vassal(liege.id, target_id):
+		return _fail("cannot_vassalize")
+	var vassal := world.get_player(target_id)
+	return _ok("%s accepted the yoke of %s." % [
+		vassal.display_name if vassal else "A host",
+		liege.display_name,
+	])
 
 
 func evaluate_victory(world: GameWorld) -> void:

@@ -52,8 +52,14 @@
   "winner_id": -1,
   "victory_kind": "",
   "victory_scores": [],
+  "civics": {
+    "adopted": [],
+    "anarchy_turns": 0,
+    "catalog": []
+  },
   "hooks": {
     "civics": [],
+    "anarchy_turns": 0,
     "state_religion": "",
     "corporations": [],
     "espionage_points": {},

@@ -56,6 +56,7 @@ class Player:
 	var explored: Dictionary = {}
 	var visible: Dictionary = {}
 	var civic_ids: Array = []
+	var anarchy_turns: int = 0
 	var state_religion: String = ""
 	var corporation_ids: Array = []
 	var espionage_points: Dictionary = {}
@@ -230,6 +231,7 @@ func add_city(owner_id: int, x: int, y: int, city_name: String) -> City:
 	c.name = city_name
 	c.population = 1
 	c.worked.append(Vector2i(x, y))
+	refresh_specialist_slots(c)
 	cities.append(c)
 	var owner := get_player(owner_id)
 	if owner:
@@ -327,11 +329,53 @@ func yield_score(y: Dictionary) -> int:
 	return int(y.get("food", 0)) + int(y.get("production", 0)) * 2 + int(y.get("gold", 0))
 
 
+func specialist_count(city: City) -> int:
+	var total := 0
+	for kind in city.assigned_specialists.keys():
+		total += int(city.assigned_specialists[kind])
+	return total
+
+
+func refresh_specialist_slots(city: City) -> void:
+	var cap := Defs.specialist_slot_max(city.population)
+	city.specialist_slots = {"chronicler": cap, "wright": cap, "max": cap}
+	if not city.assigned_specialists.has("chronicler"):
+		city.assigned_specialists["chronicler"] = 0
+	if not city.assigned_specialists.has("wright"):
+		city.assigned_specialists["wright"] = 0
+	var extra: int = specialist_count(city) - cap
+	if extra > 0:
+		for kind in Defs.SPECIALIST_ORDER:
+			var have: int = int(city.assigned_specialists.get(kind, 0))
+			var drop: int = mini(have, extra)
+			city.assigned_specialists[kind] = have - drop
+			extra -= drop
+			if extra <= 0:
+				break
+
+
+func set_specialist_count(city: City, kind: String, count: int) -> bool:
+	if not Defs.SPECIALISTS.has(kind):
+		return false
+	refresh_specialist_slots(city)
+	var cap: int = int(city.specialist_slots.get("max", 0))
+	var other := 0
+	for other_kind in city.assigned_specialists.keys():
+		if str(other_kind) == kind:
+			continue
+		other += int(city.assigned_specialists[other_kind])
+	var clamped: int = clampi(count, 0, maxi(0, cap - other))
+	city.assigned_specialists[kind] = clamped
+	auto_assign_work(city)
+	return true
+
+
 func auto_assign_work(city: City) -> void:
+	refresh_specialist_slots(city)
 	var center := Vector2i(city.x, city.y)
 	if not is_worked(city, center):
 		city.worked.append(center)
-	var wanted := city.population + 1
+	var wanted: int = maxi(1, city.population + 1 - specialist_count(city))
 	var candidates: Array = []
 	for pos in city_radius_tiles(city):
 		if pos == center:
@@ -392,6 +436,24 @@ func city_yields(city: City) -> Dictionary:
 	if owner and owner.state_religion != "" and city.religions.has(owner.state_religion):
 		gold += 1
 		culture += 1
+	for kind in city.assigned_specialists.keys():
+		var n: int = int(city.assigned_specialists[kind])
+		if n <= 0:
+			continue
+		var spec: Dictionary = Defs.specialist_info(str(kind))
+		culture += n * int(spec.get("culture", 0))
+		production += n * int(spec.get("production", 0))
+	if owner:
+		if owner.civic_ids.has("high_seat") and is_capital(city):
+			production += 2
+		if owner.civic_ids.has("free_cantons"):
+			culture += 1
+		if owner.civic_ids.has("tithe"):
+			gold += 2
+			food = maxi(0, food - 1)
+		if owner.civic_ids.has("open_craft"):
+			production += 2
+			gold = maxi(0, gold - 1)
 	return {
 		"food": food,
 		"production": maxi(production, 1),
@@ -399,6 +461,15 @@ func city_yields(city: City) -> Dictionary:
 		"science": science,
 		"culture": culture,
 	}
+
+
+func is_capital(city: City) -> bool:
+	var first: City = null
+	for city_variant in cities_of(city.owner_id):
+		var other: City = city_variant
+		if first == null or other.id < first.id:
+			first = other
+	return first != null and first.id == city.id
 
 
 func can_work_tile(city: City, x: int, y: int) -> bool:
@@ -554,11 +625,54 @@ func is_faith_founded(faith_id: String) -> bool:
 	return founded_faith_ids().has(faith_id)
 
 
+func is_sovereign(player_id: int) -> bool:
+	var player := get_player(player_id)
+	return player != null and player.vassal_of < 0
+
+
+func is_hostile(a: int, b: int) -> bool:
+	if a == b:
+		return false
+	var pa := get_player(a)
+	var pb := get_player(b)
+	if pa == null or pb == null:
+		return false
+	if pa.vassal_of >= 0 or pb.vassal_of >= 0:
+		return false
+	if pa.vassal_ids.has(b) or pb.vassal_ids.has(a):
+		return false
+	return true
+
+
+func bind_vassal(liege_id: int, vassal_id: int) -> bool:
+	var liege := get_player(liege_id)
+	var vassal := get_player(vassal_id)
+	if liege == null or vassal == null:
+		return false
+	if liege_id == vassal_id:
+		return false
+	if not is_sovereign(liege_id) or not is_sovereign(vassal_id):
+		return false
+	if cities_of(vassal_id).is_empty():
+		return false
+	vassal.vassal_of = liege_id
+	if not liege.vassal_ids.has(vassal_id):
+		liege.vassal_ids.append(vassal_id)
+	return true
+
+
 func host_still_contending(player_id: int) -> bool:
+	var player := get_player(player_id)
+	if player == null:
+		return false
+	if player.vassal_of >= 0:
+		return false
 	if cities_of(player_id).size() > 0:
 		return true
-	var player := get_player(player_id)
-	if player != null and not player.ever_founded and units_of(player_id).size() > 0:
+	for vid in player.vassal_ids:
+		if cities_of(int(vid)).size() > 0:
+			return true
+	if not player.ever_founded and units_of(player_id).size() > 0:
 		return true
 	return false
 
@@ -654,6 +768,8 @@ func to_dict() -> Dictionary:
 			"culture_total": city.culture_total,
 			"border_radius": city.border_radius,
 			"religions": city.religions.duplicate(),
+			"specialist_slots": city.specialist_slots.duplicate(),
+			"assigned_specialists": city.assigned_specialists.duplicate(),
 		})
 	var player_rows: Array = []
 	for player_variant in players:
@@ -669,6 +785,10 @@ func to_dict() -> Dictionary:
 			"culture": player.culture,
 			"explored": player.explored.keys(),
 			"state_religion": player.state_religion,
+			"civic_ids": player.civic_ids.duplicate(),
+			"anarchy_turns": player.anarchy_turns,
+			"vassal_of": player.vassal_of,
+			"vassal_ids": player.vassal_ids.duplicate(),
 			"researched": player.researched.duplicate(),
 			"researching": player.researching,
 			"research_progress": player.research_progress,
@@ -754,9 +874,12 @@ func from_dict(data: Dictionary) -> void:
 		city.culture_total = int(row.get("culture_total", 0))
 		city.border_radius = int(row.get("border_radius", 1))
 		city.religions = row.get("religions", []).duplicate()
+		city.specialist_slots = row.get("specialist_slots", {}).duplicate()
+		city.assigned_specialists = row.get("assigned_specialists", {}).duplicate()
 		city.worked.clear()
 		for w in row.get("worked", []):
 			city.worked.append(Vector2i(int(w.get("x", 0)), int(w.get("y", 0))))
+		refresh_specialist_slots(city)
 		cities.append(city)
 	players.clear()
 	for row in data.get("players", []):
@@ -771,6 +894,10 @@ func from_dict(data: Dictionary) -> void:
 		player.science = int(row.get("science", 0))
 		player.culture = int(row.get("culture", 0))
 		player.state_religion = str(row.get("state_religion", ""))
+		player.civic_ids = row.get("civic_ids", []).duplicate()
+		player.anarchy_turns = int(row.get("anarchy_turns", 0))
+		player.vassal_of = int(row.get("vassal_of", -1))
+		player.vassal_ids = row.get("vassal_ids", []).duplicate()
 		player.researched = row.get("researched", []).duplicate()
 		player.researching = str(row.get("researching", ""))
 		player.research_progress = int(row.get("research_progress", 0))

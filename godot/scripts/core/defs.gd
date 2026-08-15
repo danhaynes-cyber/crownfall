@@ -62,6 +62,30 @@ const FAITHS := {
 
 const FAITH_ORDER: Array[String] = ["hearthbind", "veilpsalm", "rivercant"]
 
+const CIVIC_CATEGORIES := {
+	"crown": {"name": "Crown", "options": ["high_seat", "free_cantons"]},
+	"labor": {"name": "Labor", "options": ["tithe", "open_craft"]},
+}
+
+const CIVIC_CATEGORY_ORDER: Array[String] = ["crown", "labor"]
+
+const CIVICS := {
+	"high_seat": {"name": "High Seat", "category": "crown", "blurb": "+2 production in the first city"},
+	"free_cantons": {"name": "Free Cantons", "category": "crown", "blurb": "+1 culture in every city"},
+	"tithe": {"name": "Tithe", "category": "labor", "blurb": "+2 gold, −1 food per city"},
+	"open_craft": {"name": "Open Craft", "category": "labor", "blurb": "+2 production, −1 gold per city"},
+}
+
+const SPECIALISTS := {
+	"chronicler": {"name": "Chronicler", "culture": 2, "production": 0},
+	"wright": {"name": "Wright", "culture": 0, "production": 2},
+}
+
+const SPECIALIST_ORDER: Array[String] = ["chronicler", "wright"]
+
+const VASSAL_TRIBUTE_NUM := 1
+const VASSAL_TRIBUTE_DEN := 2
+
 const CITY_NAME_POOLS := {
 	1: ["Rivermark", "Oakhold", "Goldensill", "Thornwatch", "Dawnmere", "Hartford"],
 	2: ["Embercairn", "Nightwell", "Ashfen", "Gloamrest", "Vesperhold", "Duskbarrow"],
@@ -227,6 +251,37 @@ static func next_unfounded_faith(founded_ids: Array) -> String:
 		if not founded_ids.has(faith_id):
 			return faith_id
 	return ""
+
+
+static func civic_info(civic_id: String) -> Dictionary:
+	return CIVICS.get(civic_id, {})
+
+
+static func civic_name(civic_id: String) -> String:
+	return str(civic_info(civic_id).get("name", civic_id))
+
+
+static func civic_category(civic_id: String) -> String:
+	return str(civic_info(civic_id).get("category", ""))
+
+
+static func civic_in_category(civic_ids: Array, category: String) -> String:
+	for civic_id in civic_ids:
+		if civic_category(str(civic_id)) == category:
+			return str(civic_id)
+	return ""
+
+
+static func specialist_info(kind: String) -> Dictionary:
+	return SPECIALISTS.get(kind, {})
+
+
+static func specialist_name(kind: String) -> String:
+	return str(specialist_info(kind).get("name", kind))
+
+
+static func specialist_slot_max(population: int) -> int:
+	return maxi(0, population - 1)
 
 
 static func unit_letter(unit_type: String) -> String:

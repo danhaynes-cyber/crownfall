@@ -34,8 +34,20 @@ On the field:
 - At 8 culture, or after Ashlar, **Found Faith** (Hearthbind, Veilpsalm, or
   Rivercant). **Adopt Faith** sets the state faith; matching cities gain a
   little gold and culture. Faith walks slowly along owned culture and roads.
-- Last host with a city wins (**domination**). Hosts that never settled still
-  contend while they have units. After turn 40 the highest chronicle wins
+- **Civics:** Crown is **High Seat** (+2 production in the first city) or
+  **Free Cantons** (+1 culture per city). Labor is **Tithe** (+2 gold, −1
+  food) or **Open Craft** (+2 production, −1 gold). The first adopt in a
+  category is free; switching costs **one turn of anarchy** (cities raise
+  no hosts that turn).
+- A city of population 2+ may **Assign Chronicler** (+2 culture) or
+  **Assign Wright** (+2 production) instead of working a tile. Slots are
+  `population - 1`.
+- After you hold more cities than a rival, **Offer the Yoke**. They keep
+  remaining cities, cannot fight, and send half their gold and science.
+  Vassals count for the liege on domination.
+- Last **sovereign** with a city wins (**domination**), counting liege +
+  vassals as one side. Hosts that never settled still contend while they
+  have units. After turn 40 the highest chronicle wins
   (cities, population, culture, crafts, gold). The HUD shows victory or
   defeat and the match stops taking actions.
 - **Save Chronicle** writes `user://crownfall_save.json` (Godot user data;
@@ -75,14 +87,16 @@ GameState JSON -> AiBrain.decide(state) -> [Action, ...]
 ```
 
 - **RuleBrain** (default): settle, improve, garrison, escort, explore,
-  research, found/adopt a faith, and assault a city only when it should win.
+  research, found/adopt a faith, pick civics without thrashing, assign
+  specialists, vassalize a weaker multi-city rival, and assault a city
+  only when it should win.
 - **HttpBrain**: `POST` the snapshot to a URL; on timeout or error, fall
   back to RuleBrain. The match polls the HTTP client so the UI stays live.
 
 Brains do not touch Godot nodes. The rules engine rejects illegal moves.
-The snapshot includes fog of war, culture owners, cities (with defense and
-garrison), units, resources, scores, techs, faiths, victory fields, and the
-legal action list.
+The snapshot includes fog of war, culture owners, cities (with defense,
+garrison, and specialists), units, resources, scores, techs, faiths, civics,
+vassal ties, victory fields, and the legal action list.
 
 See [`docs/AI_PROTOCOL.md`](docs/AI_PROTOCOL.md) and [`ai/README.md`](ai/README.md).
 
@@ -108,10 +122,10 @@ docs/AI_PROTOCOL.md    JSON schema for a later model API
 tools/run_smoke.sh     downloads nothing; uses Godot on PATH
 ```
 
-Civics, corporations, espionage, vassals, and specialists remain reserved
-in the snapshot `hooks` block. Culture borders, the three-craft tech track,
-city capture, victory, and the three original faiths are implemented.
-`hooks.state_religion` and `city.religions` are live.
+Corporations and espionage remain reserved. Culture borders, techs, capture,
+victory, faiths, civics, specialists, and vassals are live. `hooks.civics`,
+`hooks.state_religion`, `hooks.vassal_of`, `hooks.vassals`, and city
+specialist fields are filled.
 
 ## Headless smoke test
 
@@ -123,9 +137,10 @@ With Godot 4.4 on `PATH` as `godot`:
 
 The script imports the project, then runs `godot/tests/smoke_test.gd`. It
 starts a game, founds a city, grows culture, builds a farm and road, researches
-a craft, captures a city, founds and adopts a faith, hits a victory, reloads a
-save, ends the turn, checks RuleBrain garrison/escort/conquest/faith policy,
-and checks that HttpBrain falls back when the URL is dead.
+a craft, captures a city, founds and adopts a faith, adopts a civic, assigns a
+specialist, vassalizes a two-city loser, hits a victory, reloads a save, ends
+the turn, checks RuleBrain garrison/escort/conquest/faith/civic policy, and
+checks that HttpBrain falls back when the URL is dead.
 
 CI runs the same path on Linux. Develop on Linux or Mac; export the `.app`
 from a Mac with Godot's macOS export templates.

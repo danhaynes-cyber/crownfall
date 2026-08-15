@@ -47,9 +47,10 @@ Apply at most 32 actions per turn. `end_turn` stops the list.
 ## GameState
 
 `protocol_version` stays `1`. New fields are additive: `techs`, `faiths`,
-`game_over`, `winner_id`, `victory_kind`, `victory_scores`, richer cities
-(`defense`, `garrison_count`, `religions`), richer `tiles` (`improvement`,
-`route`, `culture_owner_id`), and extra actions.
+`civics`, `game_over`, `winner_id`, `victory_kind`, `victory_scores`, richer
+cities (`defense`, `garrison_count`, `religions`, `specialist_slots`,
+`assigned_specialists`), richer scores (`vassal_of`, `vassals`), richer
+`tiles`, and extra actions.
 
 Fog of war is applied for `you`. Hidden tiles are omitted. Enemy units and
 cities appear only when the tile is currently visible.
@@ -106,6 +107,16 @@ cities appear only when the tile is currently visible.
     "founded": [{ "id": "hearthbind", "name": "Hearthbind", "founder_id": 2 }],
     "state_religion": "hearthbind"
   },
+  "civics": {
+    "adopted": ["high_seat", "open_craft"],
+    "anarchy_turns": 0,
+    "catalog": [
+      { "id": "high_seat", "name": "High Seat", "category": "crown", "blurb": "+2 production in the first city" },
+      { "id": "free_cantons", "name": "Free Cantons", "category": "crown", "blurb": "+1 culture in every city" },
+      { "id": "tithe", "name": "Tithe", "category": "labor", "blurb": "+2 gold, −1 food per city" },
+      { "id": "open_craft", "name": "Open Craft", "category": "labor", "blurb": "+2 production, −1 gold per city" }
+    ]
+  },
   "game_over": false,
   "winner_id": -1,
   "victory_kind": "",
@@ -113,7 +124,8 @@ cities appear only when the tile is currently visible.
     { "player_id": 2, "name": "Vesper Compact", "cities": 1, "population": 1, "culture": 3, "techs": 1, "gold": 4, "total": 36 }
   ],
   "hooks": {
-    "civics": [],
+    "civics": ["high_seat", "open_craft"],
+    "anarchy_turns": 0,
     "state_religion": "hearthbind",
     "corporations": [],
     "espionage_points": {},
@@ -136,15 +148,17 @@ cities appear only when the tile is currently visible.
 | `tiles[].culture_owner_id` | Host that currently claims the tile, or `-1`. |
 | `techs` | Researched crafts, current study, and the three-tech catalog. |
 | `faiths` | Catalog, founded faiths with founder ids, and your state faith. |
+| `civics` | Adopted civic ids, anarchy turns, and the four-civic catalog. |
 | `game_over` / `winner_id` / `victory_kind` | Match end. `winner_id` is `-1` on a stalemate. Kinds: `domination`, `score`, `stalemate`. |
 | `victory_scores` | Chronicle totals used for the turn-cap victory. |
 | `legal_actions` | Every action the rules engine would accept right now. Empty after `game_over`. |
-| `hooks` | `state_religion` is live. Civics, corporations, espionage, vassals remain reserved. Also mirrors `researched`. |
+| `hooks` | Live: `civics`, `anarchy_turns`, `state_religion`, `vassal_of`, `vassals`. Corporations and espionage remain reserved. Also mirrors `researched`. |
+| `scores[].vassal_of` / `scores[].vassals` | Visible to every brain so a remote host can see the yoke. |
 
-Cities include `defense`, `garrison_count`, `religions`, `culture_total`, and
-`border_radius`. Cities you own also include `stored_food`,
-`stored_production`, `production_type`, `production_cost`, `yields`, and
-`worked`.
+Cities include `defense`, `garrison_count`, `religions`, `culture_total`,
+`border_radius`, `specialist_slots`, and `assigned_specialists`. Cities you
+own also include `stored_food`, `stored_production`, `production_type`,
+`production_cost`, `yields`, and `worked`.
 
 **City defense:** `max(1, sum of garrison combat strength)` + 1 if the city
 tile is hills or forest + 1 if `border_radius >= 2`. An `attack_city` wins
@@ -163,10 +177,28 @@ none is set. Faith spreads slowly to nearby cities along owned culture,
 faster on roads. `adopt_religion` requires the faith in one of your cities.
 A city that follows the state faith yields +1 gold and +1 culture.
 
-**Victory:** domination if only one host still contends (has a city, or never
-settled and still has units). After turn 40, highest
-`cities*20 + population*5 + culture + techs*8 + gold/2` wins. The rules
-engine rejects every action once `game_over` is true.
+**Victory:** domination if only one **sovereign** still contends. Vassals are
+not independent; a liege contends if they or their vassals have cities.
+Hosts that never settled still contend while they have units. After turn 40,
+highest `cities*20 + population*5 + culture + techs*8 + gold/2` wins. The
+rules engine rejects every action once `game_over` is true.
+
+**Civics:** two categories. Crown: `high_seat` (+2 production in the first
+city) vs `free_cantons` (+1 culture per city). Labor: `tithe` (+2 gold, −1
+food per city) vs `open_craft` (+2 production, −1 gold per city). The first
+adopt in a category is free. Switching costs **one turn of anarchy**: city
+production does not accumulate and units do not complete. Further civic
+changes are illegal during anarchy.
+
+**Specialists:** slots = `max(0, population - 1)`. `chronicler` +2 culture;
+`wright` +2 production. Each assigned specialist frees one worked tile
+(the city tile always stays worked).
+
+**Vassals:** `offer_vassal` is legal when you are sovereign, the target is
+sovereign, they still have a city, and you hold **more** cities. Accept is
+automatic. A vassal keeps remaining cities, cannot attack, and sends half
+of that turn's gold and science to the liege. Liege and vassal are not
+hostile.
 
 ## Actions
 
@@ -183,6 +215,9 @@ engine rejects every action once `game_over` is true.
 | `research` | `tech_id` | Queue Delving, Skyfletch, or Ashlar. Science spends at end of turn. If none is queued, the next craft auto-starts. |
 | `found_religion` | `religion_id` | Found the next unfounded faith when culture ≥ 8 or Ashlar is known. |
 | `adopt_religion` | `religion_id` | Set state faith to a founded faith present in one of your cities. |
+| `adopt_civic` | `category`, `civic_id` | Adopt High Seat / Free Cantons / Tithe / Open Craft. First adopt free; switch = 1 turn anarchy. |
+| `assign_specialist` | `city_id`, `specialist`, `count` | Set chronicler or wright count in a city (capped by slots). |
+| `offer_vassal` | `player_id` | Offer the yoke to a weaker sovereign. Accept is automatic. |
 | `end_turn` | — | Stop this brain's list. |
 
 Units: `settler`, `worker` (laborer), `warrior`, `bowman`.
@@ -200,10 +235,12 @@ Only emit members of `legal_actions`. A later model adapter can mimic this:
 7. Attack a rival city only when strength beats its defense. Otherwise approach / siege. Do not suicide into a strong garrison.
 8. Remaining combat: walk toward a visible rival city; else one explores fog and extras hunt visible rivals.
 9. Production: combat if a rival city or threat is visible; laborer after the first city; settler before a second city; otherwise combat. Do not stamp endless warriors while the hinterland is unclaimed.
-10. Work the best owned adjacent tile. End turn.
+10. Work the best owned adjacent tile.
+11. Adopt civics that match the plan (war → High Seat + Open Craft; expand/faith → Free Cantons + Open Craft; cash → Tithe). Never switch a civic already on the plan.
+12. Assign a chronicler when pushing culture or faith; a wright when training hosts.
+13. Offer the yoke to a weaker rival that still has 2+ cities; otherwise finish the conquest. End turn.
 
 ## Later systems
 
-Still reserved, not implemented: civics, corporations, espionage, vassals,
-specialists. Culture borders, the tiny tech track, city capture, victory,
-and the three original faiths are live.
+Still reserved, not implemented: corporations, espionage. Culture borders,
+techs, capture, victory, faiths, civics, specialists, and vassals are live.

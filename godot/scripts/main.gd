@@ -54,6 +54,9 @@ func _build_hud() -> void:
 	hud.research_pressed.connect(_on_research)
 	hud.found_religion_pressed.connect(_on_found_religion)
 	hud.adopt_religion_pressed.connect(_on_adopt_religion)
+	hud.civic_pressed.connect(_on_civic)
+	hud.specialist_pressed.connect(_on_specialist)
+	hud.vassal_pressed.connect(_on_vassal)
 	hud.save_pressed.connect(_on_save)
 	hud.title_pressed.connect(_show_title)
 
@@ -84,13 +87,13 @@ func _build_title() -> void:
 	var blurb := Label.new()
 	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	blurb.custom_minimum_size = Vector2(640, 0)
-	blurb.text = "Found a city, watch its culture claim the hinterland, raise laborers to farm and road the land, and study Delving, Skyfletch, or Ashlar. Assault a rival city to capture it. Found Hearthbind, Veilpsalm, or Rivercant. Last host standing — or the highest chronicle after turn 40 — wins. The Vesper Compact answers through an AiBrain."
+	blurb.text = "Found a city, claim the hinterland, raise laborers, and study Delving, Skyfletch, or Ashlar. Assault a rival city. Found a faith. Adopt Crown and Labor civics, assign chroniclers and wrights, or offer the yoke to a weaker host. Last sovereign standing — counting vassals — or the highest chronicle after turn 40 wins."
 	blurb.add_theme_color_override("font_color", Color(0.74, 0.70, 0.62))
 	box.add_child(blurb)
 	var how := Label.new()
 	how.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	how.custom_minimum_size = Vector2(640, 0)
-	how.text = "Play: New Game or Continue · click a unit · click a highlighted tile to move · Found City · assault an adjacent rival city · found or adopt a faith · Save Chronicle · End Turn.\nCamera: WASD / arrows, mouse wheel, right-drag.\nSaves write to user://crownfall_save.json (Godot user data)."
+	how.text = "Play: New Game or Continue · move · Found City · assault a city · civics / specialists / Offer the Yoke · Save Chronicle · End Turn.\nCamera: WASD / arrows, mouse wheel, right-drag.\nSaves write to user://crownfall_save.json (Godot user data)."
 	how.add_theme_color_override("font_color", Color(0.68, 0.64, 0.56))
 	box.add_child(how)
 	var new_game := Button.new()
@@ -303,6 +306,36 @@ func _on_found_religion() -> void:
 		return
 	for action in session.rules.list_legal_actions(session.world, CrownMatch.HUMAN_ID):
 		if str(action.get("type", "")) == "found_religion":
+			session.submit(action)
+			hud.refresh()
+			map_view.queue_redraw()
+			return
+
+
+func _on_civic(category: String, civic_id: String) -> void:
+	if session == null or session.world.game_over:
+		return
+	session.submit({"type": "adopt_civic", "category": category, "civic_id": civic_id})
+	hud.refresh()
+
+
+func _on_specialist(kind: String) -> void:
+	if session == null or session.world.game_over or selected_city_id < 0:
+		return
+	var city := session.world.get_city(selected_city_id)
+	if city == null:
+		return
+	var next_count: int = int(city.assigned_specialists.get(kind, 0)) + 1
+	session.submit({"type": "assign_specialist", "city_id": city.id, "specialist": kind, "count": next_count})
+	hud.refresh()
+	map_view.queue_redraw()
+
+
+func _on_vassal() -> void:
+	if session == null or session.world.game_over:
+		return
+	for action in session.rules.list_legal_actions(session.world, CrownMatch.HUMAN_ID):
+		if str(action.get("type", "")) == "offer_vassal":
 			session.submit(action)
 			hud.refresh()
 			map_view.queue_redraw()

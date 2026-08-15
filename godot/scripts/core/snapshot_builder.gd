@@ -59,6 +59,8 @@ static func build(world: GameWorld, viewer_id: int, rules: RulesEngine) -> Dicti
 			"defense": world.city_defense(city),
 			"garrison_count": world.garrison_count(city),
 			"specialists": city.assigned_specialists,
+			"assigned_specialists": city.assigned_specialists,
+			"specialist_slots": city.specialist_slots,
 			"religions": city.religions,
 			"corporations": city.corporations,
 		}
@@ -90,6 +92,9 @@ static func build(world: GameWorld, viewer_id: int, rules: RulesEngine) -> Dicti
 			"is_human": player.is_human,
 			"cities": visible_cities,
 			"units": visible_units,
+			"vassal_of": player.vassal_of,
+			"vassals": player.vassal_ids.duplicate(),
+			"is_sovereign": world.is_sovereign(player.id),
 		}
 		if player.id == viewer_id:
 			score["gold"] = player.gold
@@ -124,19 +129,21 @@ static func build(world: GameWorld, viewer_id: int, rules: RulesEngine) -> Dicti
 		"legal_actions": rules.list_legal_actions(world, viewer_id),
 		"techs": _techs(you),
 		"faiths": _faiths(world, you),
+		"civics": _civics(you),
 		"game_over": world.game_over,
 		"winner_id": world.winner_id,
 		"victory_kind": world.victory_kind,
 		"victory_scores": world.victory_scorecard(),
 		"hooks": {
-			"civics": you.civic_ids if you else [],
+			"civics": you.civic_ids.duplicate() if you else [],
+			"anarchy_turns": you.anarchy_turns if you else 0,
 			"state_religion": you.state_religion if you else "",
 			"corporations": you.corporation_ids if you else [],
 			"espionage_points": you.espionage_points if you else {},
 			"vassal_of": you.vassal_of if you else -1,
-			"vassals": you.vassal_ids if you else [],
+			"vassals": you.vassal_ids.duplicate() if you else [],
 			"researched": you.researched.duplicate() if you else [],
-			"note": "state_religion and city.religions are live. Civics, corporations, espionage, vassals, and specialists remain reserved. Techs are first-class under techs.",
+			"note": "hooks.civics, state_religion, vassal_of, vassals, and city specialists are live. Corporations, espionage, and remaining reserved fields stay empty. Techs are first-class under techs.",
 		},
 	}
 
@@ -181,4 +188,21 @@ static func _faiths(world: GameWorld, you: GameWorld.Player) -> Dictionary:
 		"catalog": catalog,
 		"founded": founded,
 		"state_religion": you.state_religion if you else "",
+	}
+
+
+static func _civics(you: GameWorld.Player) -> Dictionary:
+	var catalog: Array = []
+	for civic_id in Defs.CIVICS.keys():
+		var info: Dictionary = Defs.civic_info(str(civic_id))
+		catalog.append({
+			"id": civic_id,
+			"name": info.get("name", civic_id),
+			"category": info.get("category", ""),
+			"blurb": info.get("blurb", ""),
+		})
+	return {
+		"adopted": you.civic_ids.duplicate() if you else [],
+		"anarchy_turns": you.anarchy_turns if you else 0,
+		"catalog": catalog,
 	}

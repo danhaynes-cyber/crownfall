@@ -20,12 +20,26 @@ extends AiBrain
 ##    worker after the first city; settler before a second city; otherwise
 ##    combat. Never endless warriors while the hinterland is still unclaimed.
 ## 10. Work the best owned adjacent tile. End turn.
+## 11. Adopt civics that match the plan (war → High Seat + Open Craft;
+##     expand/faith → Free Cantons + Open Craft; cash → Tithe). Never
+##     switch a civic already on the plan.
+## 12. Assign a chronicler when pushing culture or faith; a wright when
+##     cities are training hosts.
+## 13. Offer the yoke to a weaker rival that still has 2+ cities if this
+##     host is not already a turn from domination; otherwise finish them.
 
 
 func compute_actions(state: Dictionary) -> Array:
 	var legal: Array = state.get("legal_actions", [])
 	var chosen: Array = []
 	var used_units: Dictionary = {}
+
+	for action in _pick_civics(state, legal):
+		chosen.append(action)
+
+	var vassal := _pick_vassal(state, legal)
+	if not vassal.is_empty():
+		chosen.append(vassal)
 
 	var research := _pick_research(state, legal)
 	if not research.is_empty():
@@ -78,6 +92,9 @@ func compute_actions(state: Dictionary) -> Array:
 		chosen.append(action)
 
 	for action in _best_work_tiles(state, legal):
+		chosen.append(action)
+
+	for action in _pick_specialists(state, legal):
 		chosen.append(action)
 
 	chosen.append({"type": "end_turn"})
@@ -135,6 +152,81 @@ func _own_cities(state: Dictionary) -> Array:
 
 func _is_combat(unit: Dictionary) -> bool:
 	return int(unit.get("strength", 0)) > 0
+
+
+func _war_plan(state: Dictionary) -> bool:
+	return _visible_rival_combat(state) or not _nearest_rival_city(state).is_empty()
+
+
+func _preferred_civics(state: Dictionary) -> Dictionary:
+	var want := {"crown": "free_cantons", "labor": "open_craft"}
+	if _war_plan(state):
+		want["crown"] = "high_seat"
+		want["labor"] = "open_craft"
+	elif int(state.get("economy", {}).get("gold", 0)) < 2 and _own_cities(state).size() >= 2:
+		want["labor"] = "tithe"
+	return want
+
+
+func _pick_civics(state: Dictionary, legal: Array) -> Array:
+	var out: Array = []
+	var adopted: Array = state.get("hooks", {}).get("civics", [])
+	if adopted.is_empty():
+		adopted = state.get("civics", {}).get("adopted", [])
+	var want: Dictionary = _preferred_civics(state)
+	var filled: Dictionary = {}
+	for action in _of_type(legal, "adopt_civic"):
+		var category := str(action.get("category", ""))
+		var civic_id := str(action.get("civic_id", ""))
+		if filled.get(category, false):
+			continue
+		if Defs.civic_in_category(adopted, category) == str(want.get(category, "")):
+			continue
+		if civic_id != str(want.get(category, "")):
+			continue
+		out.append(action)
+		filled[category] = true
+	return out
+
+
+func _pick_vassal(state: Dictionary, legal: Array) -> Dictionary:
+	if _own_cities(state).size() <= 0:
+		return {}
+	for action in _of_type(legal, "offer_vassal"):
+		var target_id := int(action.get("player_id", -1))
+		var cities := 0
+		for city in state.get("cities", []):
+			if int(city.get("owner_id", -1)) == target_id:
+				cities += 1
+		for score in state.get("scores", []):
+			if int(score.get("player_id", -1)) == target_id:
+				cities = maxi(cities, int(score.get("cities", 0)))
+		if cities >= 2:
+			return action
+	return {}
+
+
+func _pick_specialists(state: Dictionary, legal: Array) -> Array:
+	var out: Array = []
+	var assigned: Dictionary = {}
+	var want := "chronicler"
+	if _war_plan(state):
+		want = "wright"
+	elif str(state.get("hooks", {}).get("state_religion", "")) == "" and int(state.get("economy", {}).get("culture", 0)) < Defs.FAITH_FOUND_CULTURE:
+		want = "chronicler"
+	for action in _of_type(legal, "assign_specialist"):
+		var city_id := int(action.get("city_id", -1))
+		if assigned.has(city_id):
+			continue
+		if str(action.get("specialist", "")) != want:
+			continue
+		var city := _city(state, city_id)
+		var have: Dictionary = city.get("assigned_specialists", city.get("specialists", {}))
+		if int(have.get(want, 0)) >= 1:
+			continue
+		out.append(action)
+		assigned[city_id] = true
+	return out
 
 
 func _pick_research(state: Dictionary, legal: Array) -> Dictionary:
