@@ -492,9 +492,11 @@ func _test_civics_specialists_vassals(failures: PackedStringArray) -> void:
 	var session := CrownMatch.new()
 	session.new_game(20260815, false)
 	var site := _first_land(session.world, 5, 5)
+	var rival_site := _land_away(session.world, site.x, site.y, Defs.CITY_MIN_DISTANCE)
 	for unit_variant in session.world.units.duplicate():
 		session.world.remove_unit(unit_variant)
 	var city: GameWorld.City = session.world.add_city(1, site.x, site.y, "Goldensill")
+	session.world.add_city(2, rival_site.x, rival_site.y, "Embercairn")
 	session.world.current_player_id = 1
 	var before_prod: int = int(session.world.city_yields(city).get("production", 0))
 	var adopted := session.submit({"type": "adopt_civic", "category": "crown", "civic_id": "high_seat"})
@@ -583,6 +585,12 @@ func _test_civics_specialists_vassals(failures: PackedStringArray) -> void:
 	brain_session.world.add_city(2, bsite.x, bsite.y, "Vesperhold")
 	var prey: GameWorld.City = brain_session.world.add_city(1, rsite.x, rsite.y, "Hartford")
 	brain_session.world.tile_at(prey.x, prey.y).terrain = "grass"
+	var scout: GameWorld.Unit = brain_session.world.spawn_unit("warrior", prey.x, prey.y, 2)
+	if scout:
+		var adj := _land_near(brain_session.world, prey.x, prey.y, 1)
+		scout.x = adj.x
+		scout.y = adj.y
+		scout.moves_left = scout.max_moves
 	var ai_player: GameWorld.Player = brain_session.world.get_player(2)
 	ai_player.civic_ids = ["high_seat", "open_craft"]
 	brain_session.world.current_player_id = 2
