@@ -21,7 +21,7 @@ static func build(world: GameWorld, viewer_id: int, rules: RulesEngine) -> Dicti
 				"resource": tile.resource if visible else "",
 				"improvement": tile.improvement,
 				"route": tile.route,
-				"culture_owner_id": tile.culture_owner_id if visible else -1,
+				"culture_owner_id": tile.culture_owner_id,
 				"yields": world.tile_yield_at(x, y) if visible else {},
 			}
 			tiles.append(entry)
@@ -120,6 +120,7 @@ static func build(world: GameWorld, viewer_id: int, rules: RulesEngine) -> Dicti
 		"cities": cities,
 		"resources": resources,
 		"legal_actions": rules.list_legal_actions(world, viewer_id),
+		"techs": _techs(you),
 		"hooks": {
 			"civics": you.civic_ids if you else [],
 			"state_religion": you.state_religion if you else "",
@@ -127,6 +128,31 @@ static func build(world: GameWorld, viewer_id: int, rules: RulesEngine) -> Dicti
 			"espionage_points": you.espionage_points if you else {},
 			"vassal_of": you.vassal_of if you else -1,
 			"vassals": you.vassal_ids if you else [],
-			"note": "Hooks are present so later systems can land without a snapshot rewrite. They are unused in v0.",
+			"researched": you.researched.duplicate() if you else [],
+			"note": "Hooks remain for civics, religions, corporations, espionage, vassals, and specialists. Techs are first-class under techs.",
 		},
+	}
+
+
+static func _techs(you: GameWorld.Player) -> Dictionary:
+	var researched: Array = you.researched.duplicate() if you else []
+	var available: Array = []
+	for tech_id in Defs.TECH_ORDER:
+		if not researched.has(tech_id):
+			available.append(tech_id)
+	var catalog: Array = []
+	for tech_id in Defs.TECH_ORDER:
+		var info: Dictionary = Defs.tech_info(tech_id)
+		catalog.append({
+			"id": tech_id,
+			"name": info.get("name", tech_id),
+			"cost": int(info.get("cost", 0)),
+			"unlocks": str(info.get("unlocks", "")),
+		})
+	return {
+		"researched": researched,
+		"researching": you.researching if you else "",
+		"progress": you.research_progress if you else 0,
+		"available": available,
+		"catalog": catalog,
 	}

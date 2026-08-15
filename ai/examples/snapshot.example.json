@@ -23,6 +23,17 @@
     }
   ],
   "economy": { "gold": 0, "science": 0, "culture": 0 },
+  "techs": {
+    "researched": [],
+    "researching": "",
+    "progress": 0,
+    "available": ["delving", "skyfletch", "ashlar"],
+    "catalog": [
+      { "id": "delving", "name": "Delving", "cost": 10, "unlocks": "mine" },
+      { "id": "skyfletch", "name": "Skyfletch", "cost": 14, "unlocks": "bowman" },
+      { "id": "ashlar", "name": "Ashlar", "cost": 18, "unlocks": "camp" }
+    ]
+  },
   "tiles": [],
   "units": [],
   "cities": [],
@@ -34,6 +45,7 @@
     "corporations": [],
     "espionage_points": {},
     "vassal_of": -1,
-    "vassals": []
+    "vassals": [],
+    "researched": []
   }
 }

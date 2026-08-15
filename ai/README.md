@@ -13,3 +13,13 @@ every action. Protocol: [`docs/AI_PROTOCOL.md`](../docs/AI_PROTOCOL.md).
 
 To plug in a remote model later, set `url` in `http_config.json` or export
 `CROWNFALL_AI_URL` and keep the documented request/response shape.
+
+A local stand-in that only emits `legal_actions`:
+
+```bash
+python3 ai/examples/http_brain_server.py
+export CROWNFALL_AI_URL=http://127.0.0.1:8765/decide
+```
+
+`HttpBrain` is polled by the match so a slow POST does not hitch the map.
+`decide()` still exists for tests and blocks until the poll finishes.

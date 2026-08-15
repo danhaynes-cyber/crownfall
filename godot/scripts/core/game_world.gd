@@ -61,6 +61,9 @@ class Player:
 	var espionage_points: Dictionary = {}
 	var vassal_of: int = -1
 	var vassal_ids: Array = []
+	var researched: Array = []
+	var researching: String = ""
+	var research_progress: int = 0
 
 
 var width: int = Defs.MAP_W
@@ -214,6 +217,7 @@ func add_city(owner_id: int, x: int, y: int, city_name: String) -> City:
 	c.population = 1
 	c.worked.append(Vector2i(x, y))
 	cities.append(c)
+	recompute_culture_borders()
 	auto_assign_work(c)
 	return c
 
@@ -240,7 +244,7 @@ func move_cost_at(x: int, y: int) -> int:
 	var t := tile_at(x, y)
 	if t == null:
 		return 99
-	return Defs.move_cost(t.terrain)
+	return Defs.move_cost(t.terrain, t.route == "road")
 
 
 func reachable_tiles(unit: Unit) -> Dictionary:
@@ -261,7 +265,7 @@ func reachable_tiles(unit: Unit) -> Dictionary:
 				continue
 			if unit_at(nxt.x, nxt.y) != null:
 				continue
-			var nd: int = spent + Defs.move_cost(tile.terrain)
+			var nd: int = spent + move_cost_at(nxt.x, nxt.y)
 			if nd > unit.moves_left:
 				continue
 			if not dist.has(nxt) or nd < int(dist[nxt]):
@@ -299,7 +303,7 @@ func tile_yield_at(x: int, y: int) -> Dictionary:
 	var t := tile_at(x, y)
 	if t == null:
 		return {"food": 0, "production": 0, "gold": 0}
-	return Defs.tile_yields(t.terrain, t.has_river, t.resource)
+	return Defs.tile_yields(t.terrain, t.has_river, t.resource, t.improvement)
 
 
 func yield_score(y: Dictionary) -> int:
@@ -315,8 +319,7 @@ func auto_assign_work(city: City) -> void:
 	for pos in city_radius_tiles(city):
 		if pos == center:
 			continue
-		var t := tile_at(pos.x, pos.y)
-		if t == null or not Defs.is_land(t.terrain):
+		if not can_work_tile(city, pos.x, pos.y):
 			continue
 		candidates.append({"pos": pos, "score": yield_score(tile_yield_at(pos.x, pos.y))})
 	candidates.sort_custom(func(a, b): return int(a["score"]) > int(b["score"]))
@@ -332,10 +335,7 @@ func assign_work_tile(city: City, x: int, y: int) -> bool:
 	var pos := Vector2i(x, y)
 	if pos == Vector2i(city.x, city.y):
 		return true
-	if Defs.chebyshev(city.x, city.y, x, y) > 1:
-		return false
-	var t := tile_at(x, y)
-	if t == null or not Defs.is_land(t.terrain):
+	if not can_work_tile(city, x, y):
 		return false
 	if is_worked(city, pos):
 		return true
@@ -378,6 +378,82 @@ func city_yields(city: City) -> Dictionary:
 	}
 
 
+func can_work_tile(city: City, x: int, y: int) -> bool:
+	if not in_bounds(x, y):
+		return false
+	if Defs.chebyshev(city.x, city.y, x, y) > 1:
+		return false
+	var t := tile_at(x, y)
+	if t == null or not Defs.is_land(t.terrain):
+		return false
+	if x == city.x and y == city.y:
+		return true
+	return t.culture_owner_id == city.owner_id
+
+
+func owns_tile(player_id: int, x: int, y: int) -> bool:
+	var t := tile_at(x, y)
+	return t != null and t.culture_owner_id == player_id
+
+
+func recompute_culture_borders() -> void:
+	for city_variant in cities:
+		var city: City = city_variant
+		city.border_radius = Defs.border_radius_for_culture(city.culture_total)
+	var claims: Dictionary = {}
+	for city_variant in cities:
+		var city: City = city_variant
+		for y in range(city.y - city.border_radius, city.y + city.border_radius + 1):
+			for x in range(city.x - city.border_radius, city.x + city.border_radius + 1):
+				if not in_bounds(x, y):
+					continue
+				var dist := Defs.chebyshev(city.x, city.y, x, y)
+				if dist > city.border_radius:
+					continue
+				var tile := tile_at(x, y)
+				if tile == null or tile.terrain == "ocean":
+					continue
+				var score: int = city.culture_total * 3 - dist
+				if dist == 0:
+					score += 10000
+				var key := Defs.tile_key(x, y)
+				if not claims.has(key) or score > int(claims[key]["score"]):
+					claims[key] = {"owner": city.owner_id, "score": score}
+	for y in height:
+		for x in width:
+			var tile := tile_at(x, y)
+			if tile == null:
+				continue
+			var home := city_at(x, y)
+			if home != null:
+				tile.culture_owner_id = home.owner_id
+				continue
+			var key := Defs.tile_key(x, y)
+			if claims.has(key):
+				tile.culture_owner_id = int(claims[key]["owner"])
+			else:
+				tile.culture_owner_id = -1
+	_prune_lost_work()
+	for player_variant in players:
+		var player: Player = player_variant
+		for y in height:
+			for x in width:
+				if tile_at(x, y).culture_owner_id == player.id:
+					player.explored[Defs.tile_key(x, y)] = true
+
+
+func _prune_lost_work() -> void:
+	for city_variant in cities:
+		var city: City = city_variant
+		var kept: Array[Vector2i] = []
+		for pos in city.worked:
+			if can_work_tile(city, pos.x, pos.y) or (pos.x == city.x and pos.y == city.y):
+				kept.append(pos)
+		city.worked = kept
+		if city.worked.size() < city.population + 1:
+			auto_assign_work(city)
+
+
 func recompute_visibility(player_id: int) -> void:
 	var p := get_player(player_id)
 	if p == null:
@@ -386,7 +462,7 @@ func recompute_visibility(player_id: int) -> void:
 	for u in units_of(player_id):
 		_reveal(p, u.x, u.y, Defs.UNIT_VISION)
 	for c in cities_of(player_id):
-		_reveal(p, c.x, c.y, Defs.CITY_VISION)
+		_reveal(p, c.x, c.y, maxi(Defs.CITY_VISION, c.border_radius))
 
 
 func _reveal(player: Player, cx: int, cy: int, radius: int) -> void:

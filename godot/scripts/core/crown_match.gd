@@ -10,6 +10,8 @@ var brain: AiBrain
 var last_snapshot: Dictionary = {}
 var last_ai_actions: Array = []
 var last_rejected: PackedStringArray = PackedStringArray()
+var ai_waiting: bool = false
+var _turn_notes: PackedStringArray = PackedStringArray()
 
 
 func new_game(seed_value: int, use_http: bool = false, http_url: String = "") -> void:
@@ -75,23 +77,55 @@ func submit(action: Dictionary) -> Dictionary:
 
 
 func end_human_turn() -> PackedStringArray:
-	var notes := PackedStringArray()
+	var started := begin_end_human_turn()
+	if not ai_waiting:
+		return started
+	var result := poll_end_turn()
+	while not bool(result.get("done", false)):
+		OS.delay_msec(5)
+		result = poll_end_turn()
+	return result.get("notes", PackedStringArray())
+
+
+func begin_end_human_turn() -> PackedStringArray:
+	_turn_notes = PackedStringArray()
 	if world.current_player_id != HUMAN_ID:
-		notes.append("It is not your turn.")
-		return notes
-	_finish_player_turn(HUMAN_ID, notes)
+		_turn_notes.append("It is not your turn.")
+		ai_waiting = false
+		return _turn_notes
+	_finish_player_turn(HUMAN_ID, _turn_notes)
 	world.current_player_id = AI_ID
 	rules.refresh_moves(world, AI_ID)
 	world.log_event("The Vesper Compact weighs the field.")
-	notes.append("The Vesper Compact weighs the field.")
-	_run_ai_turn(notes)
-	_finish_player_turn(AI_ID, notes)
+	_turn_notes.append("The Vesper Compact weighs the field.")
+	last_rejected = PackedStringArray()
+	last_snapshot = snapshot_for(AI_ID)
+	if brain != null:
+		brain.begin_decide(last_snapshot)
+	else:
+		brain = RuleBrain.new()
+		brain.begin_decide(last_snapshot)
+	ai_waiting = true
+	return _turn_notes
+
+
+func poll_end_turn() -> Dictionary:
+	if not ai_waiting:
+		return {"done": true, "notes": _turn_notes}
+	var decided: Variant = brain.poll_decide() if brain else []
+	if decided == null:
+		return {"done": false, "notes": _turn_notes}
+	if typeof(decided) != TYPE_ARRAY:
+		decided = []
+	_apply_ai_actions(decided)
+	_finish_player_turn(AI_ID, _turn_notes)
 	world.turn_number += 1
 	world.current_player_id = HUMAN_ID
 	rules.refresh_moves(world, HUMAN_ID)
 	world.log_event("Turn %d begins for the Alden Host." % world.turn_number)
-	notes.append("Turn %d begins for the Alden Host." % world.turn_number)
-	return notes
+	_turn_notes.append("Turn %d begins for the Alden Host." % world.turn_number)
+	ai_waiting = false
+	return {"done": true, "notes": _turn_notes}
 
 
 func _finish_player_turn(player_id: int, notes: PackedStringArray) -> void:
@@ -101,14 +135,7 @@ func _finish_player_turn(player_id: int, notes: PackedStringArray) -> void:
 		notes.append(line)
 
 
-func _run_ai_turn(notes: PackedStringArray) -> void:
-	last_rejected = PackedStringArray()
-	last_snapshot = snapshot_for(AI_ID)
-	var decided: Array = []
-	if brain != null:
-		decided = brain.decide(last_snapshot)
-	if decided == null:
-		decided = []
+func _apply_ai_actions(decided: Array) -> void:
 	last_ai_actions = decided
 	var applied := 0
 	for raw in decided:
@@ -125,12 +152,12 @@ func _run_ai_turn(notes: PackedStringArray) -> void:
 			applied += 1
 			if str(result.get("message", "")) != "":
 				world.log_event(str(result["message"]))
-				notes.append(str(result["message"]))
+				_turn_notes.append(str(result["message"]))
 		else:
 			last_rejected.append("%s:%s" % [str(action.get("type", "?")), str(result.get("error", "rejected"))])
 	if applied == 0:
 		world.log_event("The Vesper Compact holds its ground.")
-		notes.append("The Vesper Compact holds its ground.")
+		_turn_notes.append("The Vesper Compact holds its ground.")
 
 
 func human() -> GameWorld.Player:

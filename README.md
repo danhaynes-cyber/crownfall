@@ -18,16 +18,22 @@ no third-party art, music, or UI chrome.
 
 On the field:
 
-- Click a unit, then a highlighted tile to move (8 directions).
+- Click a unit, then a highlighted tile to move (8 directions). Roads cost 1.
 - With a settler selected on a legal site, click **Found City** (or press `F`).
-- Click a city to assign **Train Warrior** / **Train Settler**.
-- Click an adjacent rival unit to fight (attacker strength vs defender
-  strength; hills and forest aid the defender).
-- **End Turn** (or `Enter` / `Space`). The Compact then takes its turn.
+- City culture claims the hinterland and grows the border (radius 2 at 10
+  culture). Citizens only work tiles your culture owns. Rivals can contest
+  the edge.
+- Click a city to train a **Warrior**, **Settler**, **Laborer**, or **Bowman**
+  (Bowman needs Skyfletch).
+- Select a laborer to **Raise Improvement** (farm / mine / camp) or **Cut Road**.
+- **Study** Delving (mines), Skyfletch (bowmen), or Ashlar (forest camps).
+- Click a rival unit to fight (bowmen can strike at range 2).
+- **End Turn** (or `Enter` / `Space`). The Compact then takes its turn without
+  freezing the map.
 - Camera: `WASD` or arrows, mouse wheel to zoom, right-drag to pan.
 
-Gold, science, and culture are stub integers that rise with cities so the AI
-snapshot has scores to read.
+Gold, science, and culture accumulate from cities. Science spends on the
+tiny tech track. Culture expands borders.
 
 ## Export a native macOS `.app`
 
@@ -54,20 +60,21 @@ All computer-player decisions go through `AiBrain`:
 GameState JSON -> AiBrain.decide(state) -> [Action, ...]
 ```
 
-- **RuleBrain** (default): settle, expand, defend, attack.
+- **RuleBrain** (default): settle, improve, garrison, escort, explore, research.
 - **HttpBrain**: `POST` the snapshot to a URL; on timeout or error, fall
-  back to RuleBrain.
+  back to RuleBrain. The match polls the HTTP client so the UI stays live.
 
 Brains do not touch Godot nodes. The rules engine rejects illegal moves.
-The snapshot includes fog of war, cities, units, resources, scores, and the
-legal action list.
+The snapshot includes fog of war, culture owners, cities, units, resources,
+scores, techs, and the legal action list.
 
 See [`docs/AI_PROTOCOL.md`](docs/AI_PROTOCOL.md) and [`ai/README.md`](ai/README.md).
 
-To point the Compact at a remote brain:
+To point the Compact at a remote brain (example server, no API keys):
 
 ```bash
-export CROWNFALL_AI_URL="http://127.0.0.1:8080/decide"
+python3 ai/examples/http_brain_server.py
+export CROWNFALL_AI_URL="http://127.0.0.1:8765/decide"
 ```
 
 or set `url` in `godot/ai/http_config.json`.
@@ -85,9 +92,9 @@ docs/AI_PROTOCOL.md    JSON schema for a later model API
 tools/run_smoke.sh     downloads nothing; uses Godot on PATH
 ```
 
-Civics, religions, corporations, espionage, vassals, culture borders, and
-specialists are reserved in the data model and snapshot `hooks` block. They
-are not implemented in this slice.
+Civics, religions, corporations, espionage, vassals, and specialists remain
+reserved in the snapshot `hooks` block. Culture borders and a three-craft
+tech track are implemented.
 
 ## Headless smoke test
 
@@ -98,9 +105,9 @@ With Godot 4.4 on `PATH` as `godot`:
 ```
 
 The script imports the project, then runs `godot/tests/smoke_test.gd`. It
-starts a game, founds a city, moves a unit, ends the turn, checks that
-RuleBrain emitted actions, and checks that HttpBrain falls back when the
-URL is dead.
+starts a game, founds a city, grows culture, builds a farm and road, researches
+a craft, ends the turn, checks RuleBrain garrison/escort policy, and checks
+that HttpBrain falls back when the URL is dead.
 
 CI runs the same path on Linux. Develop on Linux or Mac; export the `.app`
 from a Mac with Godot's macOS export templates.

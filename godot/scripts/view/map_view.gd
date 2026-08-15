@@ -89,6 +89,16 @@ func _draw_tile(world: GameWorld, x: int, y: int) -> void:
 		_draw_forest_mark(rect, visible)
 	if visible and tile.resource != "":
 		_draw_resource(rect, tile.resource)
+	if tile.culture_owner_id > 0:
+		var owner := world.get_player(tile.culture_owner_id)
+		if owner:
+			var wash := owner.color
+			wash.a = 0.18 if visible else 0.08
+			draw_rect(rect, wash)
+	if tile.improvement != "":
+		_draw_improvement(rect, tile.improvement, visible)
+	if tile.route == "road":
+		_draw_road(world, x, y, visible)
 	draw_rect(rect, Color(0, 0, 0, 0.18), false, 1.0)
 
 
@@ -118,6 +128,33 @@ func _draw_resource(rect: Rect2, resource: String) -> void:
 	draw_colored_polygon(PackedVector2Array([
 		c + Vector2(0, -6), c + Vector2(6, 0), c + Vector2(0, 6), c + Vector2(-6, 0)
 	]), col)
+
+
+func _draw_improvement(rect: Rect2, kind: String, visible: bool) -> void:
+	var alpha := 0.95 if visible else 0.4
+	var c := rect.get_center()
+	if kind == "farm":
+		draw_rect(Rect2(c + Vector2(-8, -4), Vector2(16, 8)), Color(0.78, 0.72, 0.28, alpha))
+	elif kind == "mine":
+		draw_colored_polygon(PackedVector2Array([
+			c + Vector2(0, -8), c + Vector2(8, 6), c + Vector2(-8, 6)
+		]), Color(0.45, 0.45, 0.48, alpha))
+	elif kind == "camp":
+		draw_rect(Rect2(c + Vector2(-7, -3), Vector2(14, 8)), Color(0.42, 0.28, 0.14, alpha))
+
+
+func _draw_road(world: GameWorld, x: int, y: int, visible: bool) -> void:
+	var c := Vector2((x + 0.5) * TILE, (y + 0.5) * TILE)
+	var col := Color(0.62, 0.50, 0.28, 0.9 if visible else 0.35)
+	draw_circle(c, 3, col)
+	for d: Vector2i in Defs.DIRS:
+		var n := Vector2i(x, y) + d
+		if not world.in_bounds(n.x, n.y):
+			continue
+		var other := world.tile_at(n.x, n.y)
+		if other != null and other.route == "road":
+			var dest := Vector2((n.x + 0.5) * TILE, (n.y + 0.5) * TILE)
+			draw_line(c, (c + dest) * 0.5, col, 2.0)
 
 
 func _draw_rivers(world: GameWorld) -> void:
@@ -187,7 +224,7 @@ func _draw_units(world: GameWorld) -> void:
 		draw_arc(center, 13, 0, TAU, 24, Color(0.08, 0.07, 0.05), 2.0)
 		if selected_unit_id == unit.id:
 			draw_arc(center, 17, 0, TAU, 28, Color(0.98, 0.90, 0.45), 2.5)
-		var letter := "S" if unit.unit_type == "settler" else "W"
+		var letter := Defs.unit_letter(unit.unit_type)
 		var font := ThemeDB.fallback_font
 		draw_string(font, center + Vector2(-5, 5), letter, HORIZONTAL_ALIGNMENT_LEFT, 16, 14, Color(0.08, 0.07, 0.05))
 		if unit.hp < unit.max_hp:

@@ -48,6 +48,9 @@ func _build_hud() -> void:
 	hud.end_turn_pressed.connect(_on_end_turn)
 	hud.found_city_pressed.connect(_on_found_city)
 	hud.produce_pressed.connect(_on_produce)
+	hud.build_improvement_pressed.connect(_on_build_improvement)
+	hud.build_route_pressed.connect(_on_build_route)
+	hud.research_pressed.connect(_on_research)
 	hud.title_pressed.connect(_show_title)
 
 
@@ -77,13 +80,13 @@ func _build_title() -> void:
 	var blurb := Label.new()
 	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	blurb.custom_minimum_size = Vector2(640, 0)
-	blurb.text = "Found a city, work the land, raise wardens, and end the turn. The Vesper Compact answers through an AiBrain — RuleBrain by default, or HttpBrain if you point it at an API."
+	blurb.text = "Found a city, watch its culture claim the hinterland, raise laborers to farm and road the land, and study Delving, Skyfletch, or Ashlar. The Vesper Compact answers through an AiBrain."
 	blurb.add_theme_color_override("font_color", Color(0.74, 0.70, 0.62))
 	box.add_child(blurb)
 	var how := Label.new()
 	how.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	how.custom_minimum_size = Vector2(640, 0)
-	how.text = "Play: New Game · click a unit · click a highlighted tile to move · Found City · End Turn.\nCamera: WASD / arrows, mouse wheel, right-drag."
+	how.text = "Play: New Game · click a unit · click a highlighted tile to move · Found City · build with a laborer · research · End Turn.\nCamera: WASD / arrows, mouse wheel, right-drag."
 	how.add_theme_color_override("font_color", Color(0.68, 0.64, 0.56))
 	box.add_child(how)
 	var new_game := Button.new()
@@ -133,6 +136,13 @@ func _center_on_human() -> void:
 
 
 func _process(delta: float) -> void:
+	if session != null and ai_busy:
+		var result: Dictionary = session.poll_end_turn()
+		if bool(result.get("done", false)):
+			ai_busy = false
+			_refresh_selection()
+		elif hud:
+			hud.refresh()
 	if title.visible or session == null:
 		return
 	var v := Vector2.ZERO
@@ -192,9 +202,11 @@ func _on_tile_clicked(x: int, y: int) -> void:
 		var selected := world.get_unit(selected_unit_id)
 		if selected != null and selected.owner_id == CrownMatch.HUMAN_ID:
 			if unit != null and unit.owner_id != CrownMatch.HUMAN_ID:
-				session.submit({"type": "attack", "unit_id": selected_unit_id, "target_unit_id": unit.id})
-				_refresh_selection()
-				return
+				var dist := Defs.chebyshev(selected.x, selected.y, unit.x, unit.y)
+				if dist <= Defs.unit_range(selected.unit_type):
+					session.submit({"type": "attack", "unit_id": selected_unit_id, "target_unit_id": unit.id})
+					_refresh_selection()
+					return
 			if unit == null and (selected.x != x or selected.y != y):
 				var result := session.submit({"type": "move_unit", "unit_id": selected_unit_id, "to": {"x": x, "y": y}})
 				if result.get("ok"):
@@ -232,14 +244,34 @@ func _on_produce(unit_type: String) -> void:
 	map_view.queue_redraw()
 
 
+func _on_build_improvement() -> void:
+	if session == null or selected_unit_id < 0:
+		return
+	session.submit({"type": "build_improvement", "unit_id": selected_unit_id})
+	_refresh_selection()
+
+
+func _on_build_route() -> void:
+	if session == null or selected_unit_id < 0:
+		return
+	session.submit({"type": "build_route", "unit_id": selected_unit_id, "route": "road"})
+	_refresh_selection()
+
+
+func _on_research(tech_id: String) -> void:
+	if session == null:
+		return
+	session.submit({"type": "research", "tech_id": tech_id})
+	hud.refresh()
+
+
 func _on_end_turn() -> void:
 	if session == null or ai_busy:
 		return
 	ai_busy = true
+	session.begin_end_human_turn()
 	hud.refresh()
-	session.end_human_turn()
-	_refresh_selection()
-	ai_busy = false
+	map_view.queue_redraw()
 
 
 func _clear_selection() -> void:

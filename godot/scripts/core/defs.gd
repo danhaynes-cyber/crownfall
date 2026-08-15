@@ -8,7 +8,7 @@ const TILE_PX := 48
 const CITY_MIN_DISTANCE := 3
 const UNIT_VISION := 1
 const CITY_VISION := 2
-const MAX_AI_ACTIONS := 24
+const MAX_AI_ACTIONS := 32
 
 const DIRS: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
@@ -30,10 +30,26 @@ const RESOURCE_BONUS := {
 	"ore": {"food": 0, "production": 1, "gold": 0},
 }
 
-const UNIT_TYPES := {
-	"settler": {"strength": 0, "max_hp": 1, "moves": 2, "cost": 20, "can_found": true},
-	"warrior": {"strength": 2, "max_hp": 2, "moves": 2, "cost": 10, "can_found": false},
+const IMPROVEMENT_BONUS := {
+	"farm": {"food": 2, "production": 0, "gold": 0},
+	"mine": {"food": 0, "production": 2, "gold": 0},
+	"camp": {"food": 1, "production": 1, "gold": 0},
 }
+
+const UNIT_TYPES := {
+	"settler": {"strength": 0, "max_hp": 1, "moves": 2, "cost": 20, "can_found": true, "can_build": false, "range": 1, "requires_tech": ""},
+	"worker": {"strength": 0, "max_hp": 1, "moves": 2, "cost": 12, "can_found": false, "can_build": true, "range": 1, "requires_tech": ""},
+	"warrior": {"strength": 2, "max_hp": 2, "moves": 2, "cost": 10, "can_found": false, "can_build": false, "range": 1, "requires_tech": ""},
+	"bowman": {"strength": 3, "max_hp": 2, "moves": 2, "cost": 14, "can_found": false, "can_build": false, "range": 2, "requires_tech": "skyfletch"},
+}
+
+const TECHS := {
+	"delving": {"name": "Delving", "cost": 10, "unlocks": "mine"},
+	"skyfletch": {"name": "Skyfletch", "cost": 14, "unlocks": "bowman"},
+	"ashlar": {"name": "Ashlar", "cost": 18, "unlocks": "camp"},
+}
+
+const TECH_ORDER: Array[String] = ["delving", "skyfletch", "ashlar"]
 
 const CITY_NAME_POOLS := {
 	1: ["Rivermark", "Oakhold", "Goldensill", "Thornwatch", "Dawnmere", "Hartford"],
@@ -50,12 +66,15 @@ static func is_water(terrain: String) -> bool:
 	return not is_land(terrain)
 
 
-static func move_cost(terrain: String) -> int:
+static func move_cost(terrain: String, has_road: bool = false) -> int:
 	var info: Dictionary = TERRAIN_INFO.get(terrain, {})
-	return int(info.get("move_cost", 1))
+	var cost := int(info.get("move_cost", 1))
+	if has_road:
+		return 1
+	return cost
 
 
-static func tile_yields(terrain: String, has_river: bool, resource: String) -> Dictionary:
+static func tile_yields(terrain: String, has_river: bool, resource: String, improvement: String = "") -> Dictionary:
 	var info: Dictionary = TERRAIN_INFO.get(terrain, {"food": 0, "production": 0, "gold": 0})
 	var food := int(info.get("food", 0))
 	var production := int(info.get("production", 0))
@@ -66,6 +85,10 @@ static func tile_yields(terrain: String, has_river: bool, resource: String) -> D
 	food += int(bonus.get("food", 0))
 	production += int(bonus.get("production", 0))
 	gold += int(bonus.get("gold", 0))
+	var built: Dictionary = IMPROVEMENT_BONUS.get(improvement, {})
+	food += int(built.get("food", 0))
+	production += int(built.get("production", 0))
+	gold += int(built.get("gold", 0))
 	return {"food": food, "production": production, "gold": gold}
 
 
@@ -89,8 +112,77 @@ static func unit_max_hp(unit_type: String) -> int:
 	return int(unit_info(unit_type).get("max_hp", 1))
 
 
+static func unit_range(unit_type: String) -> int:
+	return int(unit_info(unit_type).get("range", 1))
+
+
 static func can_found(unit_type: String) -> bool:
 	return bool(unit_info(unit_type).get("can_found", false))
+
+
+static func can_build(unit_type: String) -> bool:
+	return bool(unit_info(unit_type).get("can_build", false))
+
+
+static func is_combat(unit_type: String) -> bool:
+	return unit_strength(unit_type) > 0
+
+
+static func required_tech(unit_type: String) -> String:
+	return str(unit_info(unit_type).get("requires_tech", ""))
+
+
+static func has_tech(researched: Array, tech_id: String) -> bool:
+	if tech_id == "":
+		return true
+	return researched.has(tech_id)
+
+
+static func can_produce(unit_type: String, researched: Array) -> bool:
+	if not UNIT_TYPES.has(unit_type):
+		return false
+	return has_tech(researched, required_tech(unit_type))
+
+
+static func tech_info(tech_id: String) -> Dictionary:
+	return TECHS.get(tech_id, {})
+
+
+static func tech_cost(tech_id: String) -> int:
+	return int(tech_info(tech_id).get("cost", 99))
+
+
+static func tech_name(tech_id: String) -> String:
+	return str(tech_info(tech_id).get("name", tech_id))
+
+
+static func next_unresearched(researched: Array) -> String:
+	for tech_id in TECH_ORDER:
+		if not researched.has(tech_id):
+			return tech_id
+	return ""
+
+
+static func improvement_for_tile(terrain: String, has_river: bool, researched: Array) -> String:
+	if terrain == "hills" and has_tech(researched, "delving"):
+		return "mine"
+	if terrain == "forest" and has_tech(researched, "ashlar"):
+		return "camp"
+	if terrain == "grass" or terrain == "plains":
+		return "farm"
+	if has_river and is_land(terrain):
+		return "farm"
+	return ""
+
+
+static func border_radius_for_culture(total: int) -> int:
+	if total >= 50:
+		return 4
+	if total >= 25:
+		return 3
+	if total >= 10:
+		return 2
+	return 1
 
 
 static func chebyshev(ax: int, ay: int, bx: int, by: int) -> int:
@@ -113,3 +205,15 @@ static func city_name(player_id: int, index: int) -> String:
 	if index < pool.size():
 		return String(pool[index])
 	return "Newstead %d" % [index + 1]
+
+
+static func unit_letter(unit_type: String) -> String:
+	match unit_type:
+		"settler":
+			return "S"
+		"worker":
+			return "L"
+		"bowman":
+			return "B"
+		_:
+			return "W"

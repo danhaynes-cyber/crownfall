@@ -4,11 +4,22 @@ extends AiBrain
 ## POSTs the GameState snapshot to a configurable URL and expects Actions JSON.
 ## On timeout, transport error, or malformed payload, falls back to RuleBrain.
 ## Uses HTTPClient (RefCounted), not HTTPRequest, so it never touches scene nodes.
+##
+## decide() stays snapshot-in / actions-out. The match should call
+## begin_decide + poll_decide so the UI can keep rendering; poll_decide
+## never calls OS.delay_msec.
 
 var url: String = ""
 var timeout_ms: int = 2500
 var last_error: String = ""
 var used_fallback: bool = false
+
+var _client: HTTPClient
+var _state: Dictionary = {}
+var _started_ms: int = 0
+var _requested: bool = false
+var _raw: PackedByteArray = PackedByteArray()
+var _parsed_url: Dictionary = {}
 
 
 func configure(http_url: String, timeout: int = 2500) -> void:
@@ -16,88 +27,97 @@ func configure(http_url: String, timeout: int = 2500) -> void:
 	timeout_ms = timeout
 
 
-func decide(state: Dictionary) -> Array:
+func begin_decide(state: Dictionary) -> void:
 	used_fallback = false
 	last_error = ""
-	var remote: Variant = _post_snapshot(state)
-	if remote != null:
-		return remote
-	used_fallback = true
-	return RuleBrain.new().decide(state)
-
-
-func _post_snapshot(state: Dictionary) -> Variant:
+	_ready_actions = null
+	_state = state
+	_requested = false
+	_raw = PackedByteArray()
+	_started_ms = Time.get_ticks_msec()
+	_client = HTTPClient.new()
 	if url.strip_edges() == "":
-		last_error = "empty_url"
-		return null
-	var parsed := _parse_url(url)
-	if parsed.is_empty():
-		last_error = "bad_url"
-		return null
-	var client := HTTPClient.new()
-	var tls_options: TLSOptions = TLSOptions.client() if bool(parsed["tls"]) else null
-	var err := client.connect_to_host(str(parsed["host"]), int(parsed["port"]), tls_options)
+		_fail_to_rule("empty_url")
+		return
+	_parsed_url = _parse_url(url)
+	if _parsed_url.is_empty():
+		_fail_to_rule("bad_url")
+		return
+	var tls_options: TLSOptions = TLSOptions.client() if bool(_parsed_url["tls"]) else null
+	var err := _client.connect_to_host(str(_parsed_url["host"]), int(_parsed_url["port"]), tls_options)
 	if err != OK:
-		last_error = "connect_failed"
+		_fail_to_rule("connect_failed")
+
+
+func poll_decide() -> Variant:
+	if _ready_actions != null:
+		return _ready_actions
+	if _client == null:
+		_fail_to_rule("no_client")
+		return _ready_actions
+	if Time.get_ticks_msec() - _started_ms > timeout_ms:
+		_fail_to_rule("timeout")
+		return _ready_actions
+	_client.poll()
+	var status := _client.get_status()
+	if status == HTTPClient.STATUS_RESOLVING or status == HTTPClient.STATUS_CONNECTING:
 		return null
-	var started := Time.get_ticks_msec()
-	while client.get_status() == HTTPClient.STATUS_RESOLVING or client.get_status() == HTTPClient.STATUS_CONNECTING:
-		if Time.get_ticks_msec() - started > timeout_ms:
-			last_error = "connect_timeout"
-			client.close()
+	if status == HTTPClient.STATUS_CONNECTED:
+		if not _requested:
+			var body := JSON.stringify(_state)
+			var headers := PackedStringArray([
+				"Content-Type: application/json",
+				"Accept: application/json",
+				"User-Agent: Crownfall-HttpBrain/0.1",
+			])
+			var err := _client.request(HTTPClient.METHOD_POST, str(_parsed_url["path"]), headers, body)
+			if err != OK:
+				_fail_to_rule("request_failed")
+				return _ready_actions
+			_requested = true
 			return null
-		client.poll()
-		OS.delay_msec(10)
-	if client.get_status() != HTTPClient.STATUS_CONNECTED:
-		last_error = "not_connected"
-		client.close()
+		_finish_body()
+		return _ready_actions
+	if status == HTTPClient.STATUS_REQUESTING:
 		return null
-	var body := JSON.stringify(state)
-	var headers := PackedStringArray([
-		"Content-Type: application/json",
-		"Accept: application/json",
-		"User-Agent: Crownfall-HttpBrain/0.1",
-	])
-	err = client.request(HTTPClient.METHOD_POST, str(parsed["path"]), headers, body)
-	if err != OK:
-		last_error = "request_failed"
-		client.close()
+	if status == HTTPClient.STATUS_BODY:
+		var chunk := _client.read_response_body_chunk()
+		if chunk.size() > 0:
+			_raw.append_array(chunk)
 		return null
-	while client.get_status() == HTTPClient.STATUS_REQUESTING:
-		if Time.get_ticks_msec() - started > timeout_ms:
-			last_error = "request_timeout"
-			client.close()
-			return null
-		client.poll()
-		OS.delay_msec(10)
-	if client.get_status() != HTTPClient.STATUS_BODY and client.get_status() != HTTPClient.STATUS_CONNECTED:
-		last_error = "bad_status"
-		client.close()
-		return null
-	if client.get_response_code() < 200 or client.get_response_code() >= 300:
-		last_error = "http_%d" % client.get_response_code()
-		client.close()
-		return null
-	var raw := PackedByteArray()
-	while client.get_status() == HTTPClient.STATUS_BODY:
-		if Time.get_ticks_msec() - started > timeout_ms:
-			last_error = "body_timeout"
-			client.close()
-			return null
-		client.poll()
-		var chunk := client.read_response_body_chunk()
-		if chunk.size() == 0:
-			OS.delay_msec(10)
+	if status == HTTPClient.STATUS_DISCONNECTED:
+		if _requested:
+			_finish_body()
 		else:
-			raw.append_array(chunk)
-	client.close()
-	var text := raw.get_string_from_utf8()
+			_fail_to_rule("disconnected")
+		return _ready_actions
+	if status == HTTPClient.STATUS_CANT_CONNECT or status == HTTPClient.STATUS_CANT_RESOLVE or status == HTTPClient.STATUS_CONNECTION_ERROR or status == HTTPClient.STATUS_TLS_HANDSHAKE_ERROR:
+		_fail_to_rule("transport")
+		return _ready_actions
+	_fail_to_rule("bad_status")
+	return _ready_actions
+
+
+func _finish_body() -> void:
+	if _client.get_response_code() < 200 or _client.get_response_code() >= 300:
+		_fail_to_rule("http_%d" % _client.get_response_code())
+		return
+	var text := _raw.get_string_from_utf8()
 	var decoded: Variant = JSON.parse_string(text)
 	var actions: Variant = _extract_actions(decoded)
+	_client.close()
 	if actions == null:
-		last_error = "bad_payload"
-		return null
-	return actions
+		_fail_to_rule("bad_payload")
+		return
+	_ready_actions = actions
+
+
+func _fail_to_rule(error: String) -> void:
+	last_error = error
+	used_fallback = true
+	if _client != null:
+		_client.close()
+	_ready_actions = RuleBrain.new().compute_actions(_state)
 
 
 func _extract_actions(decoded) -> Variant:
