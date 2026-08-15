@@ -3,6 +3,7 @@ extends Node
 const PAN_SPEED := 520.0
 const ZOOM_MIN := 0.45
 const ZOOM_MAX := 2.2
+const START_ZOOM := 0.82
 
 var session: CrownMatch
 var world_root: Node2D
@@ -38,8 +39,10 @@ func _build_world() -> void:
 	camera = Camera2D.new()
 	camera.name = "Camera"
 	camera.enabled = true
+	camera.zoom = Vector2(START_ZOOM, START_ZOOM)
 	camera.position = Vector2(Defs.MAP_W * Defs.TILE_PX * 0.5, Defs.MAP_H * Defs.TILE_PX * 0.5)
 	world_root.add_child(camera)
+	camera.make_current()
 
 
 func _build_hud() -> void:
@@ -92,7 +95,7 @@ func _build_title() -> void:
 	var card := Label.new()
 	card.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	card.custom_minimum_size = Vector2(640, 0)
-	card.text = "Controls\n• Select a unit, then a highlighted tile to move.\n• Settler: Found City (F) on grass or plains, away from other cities.\n• City: train a warrior, settler, or laborer. More actions holds the rest.\n• End Turn (Enter). Vesper and Skelder then play.\n• Camera: WASD or arrows, mouse wheel, right-drag.\n• Black = unknown. Dim = explored. Clear = visible.\nLast host standing, or the highest chronicle after turn 40, wins."
+	card.text = "Controls\n• Select a unit, then a highlighted tile to move.\n• Settler: Found City (F) on grass or plains, away from other cities.\n• City: train a warrior, settler, or laborer. More actions holds the rest.\n• End Turn (Enter). Vesper and Skelder then play.\n• Camera: WASD or arrows, mouse wheel, right-drag.\n• Dark grid = unknown. Dim = explored. Clear = visible.\nLast host standing, or the highest chronicle after turn 40, wins."
 	card.add_theme_color_override("font_color", Color(0.78, 0.74, 0.64))
 	box.add_child(card)
 	var new_game := Button.new()
@@ -170,8 +173,10 @@ func _select_opening_settler() -> void:
 
 
 func _center_on_human() -> void:
-	if session == null:
+	if session == null or camera == null:
 		return
+	camera.make_current()
+	camera.zoom = Vector2(START_ZOOM, START_ZOOM)
 	for unit in session.world.units_of(CrownMatch.HUMAN_ID):
 		camera.position = Vector2((unit.x + 0.5) * Defs.TILE_PX, (unit.y + 0.5) * Defs.TILE_PX)
 		return

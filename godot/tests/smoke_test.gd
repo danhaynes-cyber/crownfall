@@ -27,6 +27,7 @@ func _run(failures: PackedStringArray) -> void:
 	_expect(failures, session.world.units_of(2).size() == 2, "vesper settler+warrior")
 	_expect(failures, session.world.units_of(3).size() == 2, "skelder settler+warrior")
 	_expect(failures, session.world.get_player(3).display_name == "Skelder Host", "third host is Skelder")
+	_test_first_look(failures, session)
 
 	var terrains: Dictionary = {}
 	var rivers := 0
@@ -127,6 +128,39 @@ func _run(failures: PackedStringArray) -> void:
 	_test_corporations_espionage(failures)
 	_test_three_hosts_water(failures)
 	_test_hud_and_early_match(failures)
+
+
+func _test_first_look(failures: PackedStringArray, session: CrownMatch) -> void:
+	_expect(failures, Defs.UNIT_VISION >= 2, "unit vision is at least 2")
+	_expect(failures, Defs.START_REVEAL_RADIUS >= 3, "start reveal is at least radius 3")
+	_expect(failures, MapView.UNEXPLORED_FILL.v > 0.15, "unexplored fill is not near-black")
+	var settler: Variant = _first_of_type(session, 1, "settler")
+	var warrior: Variant = _first_of_type(session, 1, "warrior")
+	_expect(failures, settler != null and warrior != null, "first look: both opening units exist")
+	if settler == null or warrior == null:
+		return
+	_expect(failures, session.world.is_visible(1, settler.x, settler.y), "first look: settler tile is visible")
+	_expect(failures, session.world.is_visible(1, warrior.x, warrior.y), "first look: warrior tile is visible")
+	var explored := 0
+	var visible := 0
+	var ring3 := 0
+	for y in range(settler.y - Defs.START_REVEAL_RADIUS, settler.y + Defs.START_REVEAL_RADIUS + 1):
+		for x in range(settler.x - Defs.START_REVEAL_RADIUS, settler.x + Defs.START_REVEAL_RADIUS + 1):
+			if not session.world.in_bounds(x, y):
+				continue
+			if Defs.chebyshev(settler.x, settler.y, x, y) > Defs.START_REVEAL_RADIUS:
+				continue
+			if session.world.is_explored(1, x, y):
+				explored += 1
+			if session.world.is_visible(1, x, y):
+				visible += 1
+			if Defs.chebyshev(settler.x, settler.y, x, y) == Defs.START_REVEAL_RADIUS and session.world.is_explored(1, x, y):
+				ring3 += 1
+	_expect(failures, explored >= 20, "first look: start pocket is explored")
+	_expect(failures, visible >= 9, "first look: opening vision covers a readable pocket")
+	_expect(failures, ring3 > 0, "first look: radius-3 start tiles are explored")
+	var reach: Dictionary = session.world.reachable_tiles(settler)
+	_expect(failures, reach.size() > 0, "first look: settler has highlighted move tiles")
 
 
 func _test_culture_expands(failures: PackedStringArray, session: CrownMatch, city: GameWorld.City) -> void:
@@ -889,6 +923,9 @@ func _test_hud_and_early_match(failures: PackedStringArray) -> void:
 	_expect(failures, hud._more != null and hud._more_box != null, "HUD parks rare actions behind More")
 	_expect(failures, hud._more_box.visible == false, "More menu starts closed")
 	_expect(failures, hud._card != null, "HUD has a first-run control card")
+	_expect(failures, hud._card.mouse_filter == Control.MOUSE_FILTER_STOP, "help card only blocks its own rect")
+	_expect(failures, hud._card.size.x <= 400 and hud._card.size.y <= 220, "help card is not full-screen")
+	_expect(failures, hud._card_label != null and hud._card_label.mouse_filter == Control.MOUSE_FILTER_IGNORE, "help text does not steal map clicks")
 	var card := hud._control_card_text()
 	_expect(failures, card.find("Found City") >= 0 and card.find("End Turn") >= 0, "control card names the primary actions")
 	_expect(failures, card.find("WASD") >= 0, "control card names the camera")

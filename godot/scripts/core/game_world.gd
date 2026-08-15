@@ -607,6 +607,13 @@ func _prune_lost_work() -> void:
 			auto_assign_work(city)
 
 
+func reveal_around(player_id: int, x: int, y: int, radius: int) -> void:
+	var p := get_player(player_id)
+	if p == null:
+		return
+	_reveal(p, x, y, radius)
+
+
 func recompute_visibility(player_id: int) -> void:
 	var p := get_player(player_id)
 	if p == null:

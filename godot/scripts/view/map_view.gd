@@ -22,6 +22,9 @@ const TERRAIN_COLOR := {
 	"ocean": Color(0.09, 0.22, 0.40),
 }
 
+const UNEXPLORED_FILL := Color(0.12, 0.16, 0.22)
+const UNEXPLORED_GRID := Color(0.22, 0.28, 0.36, 0.55)
+
 
 func bind(match_session: CrownMatch) -> void:
 	session = match_session
@@ -76,7 +79,8 @@ func _draw_tile(world: GameWorld, x: int, y: int) -> void:
 	var explored := world.is_explored(viewer_id, x, y)
 	var visible := world.is_visible(viewer_id, x, y)
 	if not explored:
-		draw_rect(rect, Color(0.02, 0.02, 0.03))
+		draw_rect(rect, UNEXPLORED_FILL)
+		draw_rect(rect, UNEXPLORED_GRID, false, 1.0)
 		return
 	var tile := world.tile_at(x, y)
 	var color: Color = TERRAIN_COLOR.get(tile.terrain, Color.GRAY)

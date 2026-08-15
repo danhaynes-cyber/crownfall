@@ -216,6 +216,7 @@ func _place_starting_hosts(world: GameWorld, rng: RandomNumberGenerator) -> void
 			origin = _any_settle_tile(world)
 		placed.append(origin)
 		_seed_host(world, int(spec["id"]), origin, rng)
+		world.reveal_around(int(spec["id"]), origin.x, origin.y, Defs.START_REVEAL_RADIUS)
 	for player_variant in world.players:
 		var player: GameWorld.Player = player_variant
 		world.recompute_visibility(player.id)

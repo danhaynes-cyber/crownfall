@@ -33,14 +33,14 @@ first three turns.
 - City: train a warrior, settler, or laborer. **More actions** holds the rest.
 - **End Turn** (`Enter` or `Space`). The two computer hosts then play.
 - Camera: `WASD` or arrows, mouse wheel to zoom, right-drag to pan.
-- Black tiles are unknown. Dim tiles are explored. Clear tiles are visible.
+- Dark grid tiles are unknown. Dim tiles are explored. Clear tiles are visible.
 
 Last host standing wins, or the highest chronicle after turn 40.
 
 ## On the field
 
 - Click a unit, then a highlighted tile to move (8 directions). Roads cost 1.
-  Unexplored tiles are black, explored tiles are dim, visible tiles are clear.
+  Unexplored tiles are a dark grid, explored tiles are dim, visible tiles are clear.
 - With a settler selected on a legal site, click **Found City** (or press `F`).
 - City culture claims the hinterland and grows the border (radius 2 at 10
   culture). Citizens only work tiles your culture owns. Rivals can contest

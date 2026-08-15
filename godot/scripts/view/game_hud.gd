@@ -83,6 +83,7 @@ func _ready() -> void:
 	_banner = Label.new()
 	_banner.position = Vector2(360, 48)
 	_banner.size = Vector2(720, 28)
+	_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_banner.add_theme_color_override("font_color", Color(0.98, 0.86, 0.42))
 	_banner.add_theme_font_size_override("font_size", 18)
@@ -212,12 +213,15 @@ func _ready() -> void:
 	log_panel.add_child(_log)
 
 	_card = _panel(Color(0.07, 0.06, 0.05, 0.94))
+	_card.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	_card.position = Vector2(16, 56)
 	_card.size = Vector2(360, 188)
+	_card.mouse_filter = Control.MOUSE_FILTER_STOP
 	root.add_child(_card)
 	_card_label = Label.new()
 	_card_label.position = Vector2(12, 10)
 	_card_label.size = Vector2(336, 132)
+	_card_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_card_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_card_label.add_theme_color_override("font_color", Color(0.90, 0.84, 0.68))
 	_card_label.add_theme_font_size_override("font_size", 13)
@@ -227,6 +231,7 @@ func _ready() -> void:
 	got.text = "Got it"
 	got.position = Vector2(12, 148)
 	got.size = Vector2(120, 28)
+	got.mouse_filter = Control.MOUSE_FILTER_STOP
 	_style_button(got)
 	got.pressed.connect(_dismiss_help)
 	_card.add_child(got)
@@ -457,7 +462,7 @@ func _banner_text(world: GameWorld) -> String:
 
 
 func _control_card_text() -> String:
-	return "Select a unit, then a highlighted tile to move.\nSettler: Found City (F).\nCity: train a warrior, settler, or laborer.\nEnd Turn (Enter). Camera: WASD, wheel, right-drag.\nBlack tiles are unknown. Dim tiles are explored."
+	return "Select a unit, then a highlighted tile to move.\nSettler: Found City (F).\nCity: train a warrior, settler, or laborer.\nEnd Turn (Enter). Camera: WASD, wheel, right-drag.\nDark grid is unknown. Dim tiles are explored."
 
 
 func _research_callback(tech_id: String) -> Callable:
