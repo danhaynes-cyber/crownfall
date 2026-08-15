@@ -1,0 +1,39 @@
+{
+  "protocol_version": 1,
+  "game": "crownfall",
+  "turn": 1,
+  "you": 2,
+  "map": {
+    "width": 20,
+    "height": 20,
+    "movement": "8-direction",
+    "tile_shape": "square"
+  },
+  "scores": [
+    {
+      "player_id": 2,
+      "name": "Vesper Compact",
+      "is_you": true,
+      "is_human": false,
+      "cities": 0,
+      "units": 2,
+      "gold": 0,
+      "science": 0,
+      "culture": 0
+    }
+  ],
+  "economy": { "gold": 0, "science": 0, "culture": 0 },
+  "tiles": [],
+  "units": [],
+  "cities": [],
+  "resources": [],
+  "legal_actions": [{ "type": "end_turn" }],
+  "hooks": {
+    "civics": [],
+    "state_religion": "",
+    "corporations": [],
+    "espionage_points": {},
+    "vassal_of": -1,
+    "vassals": []
+  }
+}

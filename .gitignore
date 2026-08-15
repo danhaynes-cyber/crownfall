@@ -1,0 +1,8 @@
+.godot/
+*.uid
+export_credentials.cfg
+dist/
+build/
+.DS_Store
+*.translation
+/tmp/
