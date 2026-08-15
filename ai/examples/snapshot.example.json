@@ -1,0 +1,88 @@
+{
+  "protocol_version": 1,
+  "game": "crownfall",
+  "turn": 1,
+  "you": 2,
+  "players": [
+    { "id": 1, "name": "Alden Host", "short_name": "Alden", "is_you": false, "is_human": true },
+    { "id": 2, "name": "Vesper Compact", "short_name": "Vesper", "is_you": true, "is_human": false },
+    { "id": 3, "name": "Skelder Host", "short_name": "Skelder", "is_you": false, "is_human": false }
+  ],
+  "map": {
+    "width": 28,
+    "height": 20,
+    "movement": "8-direction",
+    "tile_shape": "square"
+  },
+  "scores": [
+    {
+      "player_id": 2,
+      "name": "Vesper Compact",
+      "is_you": true,
+      "is_human": false,
+      "cities": 0,
+      "units": 2,
+      "gold": 0,
+      "science": 0,
+      "culture": 0
+    }
+  ],
+  "economy": { "gold": 0, "science": 0, "culture": 0 },
+  "techs": {
+    "researched": [],
+    "researching": "",
+    "progress": 0,
+    "available": ["delving", "skyfletch", "ashlar"],
+    "catalog": [
+      { "id": "delving", "name": "Delving", "cost": 10, "unlocks": "mine" },
+      { "id": "skyfletch", "name": "Skyfletch", "cost": 14, "unlocks": "bowman" },
+      { "id": "ashlar", "name": "Ashlar", "cost": 18, "unlocks": "camp" }
+    ]
+  },
+  "tiles": [],
+  "units": [],
+  "cities": [],
+  "resources": [],
+  "legal_actions": [{ "type": "end_turn" }],
+  "faiths": {
+    "catalog": [
+      { "id": "hearthbind", "name": "Hearthbind" },
+      { "id": "veilpsalm", "name": "Veilpsalm" },
+      { "id": "rivercant", "name": "Rivercant" }
+    ],
+    "founded": [],
+    "state_religion": ""
+  },
+  "game_over": false,
+  "winner_id": -1,
+  "victory_kind": "",
+  "victory_scores": [],
+  "civics": {
+    "adopted": [],
+    "anarchy_turns": 0,
+    "catalog": []
+  },
+  "corporations": {
+    "catalog": [
+      { "id": "veinwright", "name": "Veinwright Charter", "resource": "ore", "requires_tech": "delving", "gold": 2, "production": 1, "upkeep_food": 1 },
+      { "id": "sheafhall", "name": "Sheafhall League", "resource": "grain", "requires_tech": "", "gold": 2, "production": 0, "upkeep_food": 1 }
+    ],
+    "founded": [],
+    "yours": []
+  },
+  "espionage": {
+    "points": {},
+    "income_per_rival": 2,
+    "costs": { "scout_city": 4, "reveal_tile": 3, "steal_tech": 10, "foment": 5 }
+  },
+  "hooks": {
+    "civics": [],
+    "anarchy_turns": 0,
+    "state_religion": "",
+    "corporations": [],
+    "espionage_points": {},
+    "vassal_of": -1,
+    "vassals": [],
+    "researched": []
+  }
+}
