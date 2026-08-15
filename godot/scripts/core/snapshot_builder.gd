@@ -105,11 +105,21 @@ static func build(world: GameWorld, viewer_id: int, rules: RulesEngine) -> Dicti
 			score["science"] = null
 			score["culture"] = null
 		scores.append(score)
+	var hosts: Array = []
+	for player in world.players:
+		hosts.append({
+			"id": player.id,
+			"name": player.display_name,
+			"short_name": player.short_name,
+			"is_you": player.id == viewer_id,
+			"is_human": player.is_human,
+		})
 	return {
 		"protocol_version": Defs.PROTOCOL_VERSION,
 		"game": "crownfall",
 		"turn": world.turn_number,
 		"you": viewer_id,
+		"players": hosts,
 		"map": {
 			"width": world.width,
 			"height": world.height,

@@ -1,7 +1,7 @@
 extends SceneTree
 
-## Headless check: culture, laborers, techs, capture, faith, victory,
-## save/load, smarter RuleBrain, and HttpBrain fallback.
+## Headless check: 3 hosts, water, culture, laborers, techs, capture,
+## faith, victory, save/load, RuleBrain, and HttpBrain fallback.
 
 
 func _init() -> void:
@@ -21,10 +21,12 @@ func _run(failures: PackedStringArray) -> void:
 	var session := CrownMatch.new()
 	session.new_game(20260815, false)
 	_expect(failures, session.world != null, "world exists")
-	_expect(failures, session.world.width == 20 and session.world.height == 20, "20x20 map")
-	_expect(failures, session.world.players.size() == 2, "two players")
+	_expect(failures, session.world.width == 28 and session.world.height == 20, "28x20 map")
+	_expect(failures, session.world.players.size() == 3, "three players")
 	_expect(failures, session.world.units_of(1).size() == 2, "human settler+warrior")
-	_expect(failures, session.world.units_of(2).size() == 2, "ai settler+warrior")
+	_expect(failures, session.world.units_of(2).size() == 2, "vesper settler+warrior")
+	_expect(failures, session.world.units_of(3).size() == 2, "skelder settler+warrior")
+	_expect(failures, session.world.get_player(3).display_name == "Skelder Host", "third host is Skelder")
 
 	var terrains: Dictionary = {}
 	var rivers := 0
@@ -37,13 +39,14 @@ func _run(failures: PackedStringArray) -> void:
 	_expect(failures, rivers > 0, "river overlay present")
 
 	var snap := session.snapshot_for(1)
-	for key in ["protocol_version", "tiles", "units", "cities", "resources", "scores", "legal_actions", "economy", "hooks", "techs", "faiths", "civics", "corporations", "espionage", "game_over", "winner_id", "victory_kind", "victory_scores"]:
+	for key in ["protocol_version", "tiles", "units", "cities", "resources", "scores", "players", "legal_actions", "economy", "hooks", "techs", "faiths", "civics", "corporations", "espionage", "game_over", "winner_id", "victory_kind", "victory_scores"]:
 		_expect(failures, snap.has(key), "snapshot has %s" % key)
 	_expect(failures, snap["hooks"].has("state_religion"), "hooks.state_religion present")
 	_expect(failures, snap["hooks"].has("civics") and snap["hooks"].has("vassal_of") and snap["hooks"].has("vassals"), "hooks civics and vassals present")
 	_expect(failures, snap["hooks"].has("corporations") and snap["hooks"].has("espionage_points"), "hooks corporations and espionage_points present")
 	_expect(failures, bool(snap.get("game_over", true)) == false, "new match is not over")
 	_expect(failures, snap["legal_actions"] is Array and snap["legal_actions"].size() > 0, "legal actions listed")
+	_expect(failures, snap.get("players", []).size() == 3, "snapshot player list is N")
 	_expect(failures, snap["hooks"].has("civics"), "civics hook")
 	_expect(failures, snap["techs"].has("catalog") and snap["techs"]["catalog"].size() == 3, "tech catalog")
 	_expect(failures, snap["economy"].has("gold") and snap["economy"].has("science") and snap["economy"].has("culture"), "stub yields")
@@ -107,6 +110,7 @@ func _run(failures: PackedStringArray) -> void:
 	_expect(failures, notes.size() > 0, "end turn produced notes")
 	_expect(failures, session.world.current_player_id == 1, "human turn after AI")
 	_expect(failures, session.last_ai_actions.size() > 0, "RuleBrain emitted actions")
+	_expect(failures, session.last_ai_ids.size() == 2, "both computer hosts took a turn")
 	_expect(failures, not _has_illegal_emit(session), "RuleBrain stayed on legal types")
 
 	var http := HttpBrain.new()
@@ -121,6 +125,7 @@ func _run(failures: PackedStringArray) -> void:
 	_test_rulebrain_city_and_faith(failures)
 	_test_civics_specialists_vassals(failures)
 	_test_corporations_espionage(failures)
+	_test_three_hosts_water(failures)
 
 
 func _test_culture_expands(failures: PackedStringArray, session: CrownMatch, city: GameWorld.City) -> void:
@@ -734,6 +739,154 @@ func _test_corporations_espionage(failures: PackedStringArray) -> void:
 		if str(action.get("type", "")) in ["scout_city", "reveal_tile", "steal_tech", "foment"]:
 			used_mission = true
 	_expect(failures, used_mission, "RuleBrain uses an espionage mission when points are high")
+
+
+func _test_three_hosts_water(failures: PackedStringArray) -> void:
+	var session := CrownMatch.new()
+	session.new_game(20260815, false)
+	_expect(failures, session.world.players.size() == 3, "water: three hosts")
+	_expect(failures, session.brains.size() == 2, "each computer host has a brain")
+	_expect(failures, session.brains.has(2) and session.brains.has(3), "brains keyed by player id")
+	var starts: Array[Vector2i] = []
+	for pid in [1, 2, 3]:
+		var u: Variant = _first_of_type(session, pid, "settler")
+		_expect(failures, u != null, "water: host %d settler" % pid)
+		if u:
+			starts.append(Vector2i(u.x, u.y))
+	if starts.size() == 3:
+		_expect(failures, Defs.chebyshev(starts[0].x, starts[0].y, starts[1].x, starts[1].y) >= 8, "starts 1-2 separated")
+		_expect(failures, Defs.chebyshev(starts[0].x, starts[0].y, starts[2].x, starts[2].y) >= 8, "starts 1-3 separated")
+		_expect(failures, Defs.chebyshev(starts[1].x, starts[1].y, starts[2].x, starts[2].y) >= 8, "starts 2-3 separated")
+	var inland_water := 0
+	for y in range(3, session.world.height - 3):
+		for x in range(3, session.world.width - 3):
+			if Defs.is_water(session.world.tile_at(x, y).terrain):
+				inland_water += 1
+	_expect(failures, inland_water > 8, "inland sea or channel is present")
+	var coast := _first_coast(session.world)
+	_expect(failures, coast != Vector2i(-1, -1), "found a coast tile")
+	if coast == Vector2i(-1, -1):
+		return
+	var occupant: GameWorld.Unit = session.world.unit_at(coast.x, coast.y)
+	if occupant:
+		session.world.remove_unit(occupant)
+	session.world.current_player_id = 1
+	var skiff: GameWorld.Unit = session.world.spawn_unit("skiff", coast.x, coast.y, 1)
+	_expect(failures, skiff != null, "spawned a skiff on coast")
+	if skiff == null:
+		return
+	skiff.x = coast.x
+	skiff.y = coast.y
+	skiff.moves_left = skiff.max_moves
+	_expect(failures, Defs.is_water(session.world.tile_at(skiff.x, skiff.y).terrain), "skiff stands on water")
+	var dest := _other_water(session.world, coast)
+	_expect(failures, dest != Vector2i(-1, -1), "another water tile exists")
+	var moved := false
+	if dest != Vector2i(-1, -1):
+		var blocker: GameWorld.Unit = session.world.unit_at(dest.x, dest.y)
+		if blocker:
+			session.world.remove_unit(blocker)
+		skiff.moves_left = 3
+		var result := session.submit({"type": "move_unit", "unit_id": skiff.id, "to": {"x": dest.x, "y": dest.y}})
+		moved = bool(result.get("ok", false))
+		if not moved:
+			var reach: Dictionary = session.world.reachable_tiles(skiff)
+			for step in reach.keys():
+				var hop: Vector2i = step
+				var hop_result := session.submit({"type": "move_unit", "unit_id": skiff.id, "to": {"x": hop.x, "y": hop.y}})
+				if hop_result.get("ok"):
+					moved = true
+					break
+	_expect(failures, moved, "skiff moved onto coast or ocean")
+	_expect(failures, Defs.is_water(session.world.tile_at(skiff.x, skiff.y).terrain), "skiff remains on water")
+	var land := _first_land(session.world, coast.x, coast.y)
+	var warrior: GameWorld.Unit = session.world.spawn_unit("warrior", land.x, land.y, 1)
+	if warrior:
+		warrior.x = land.x
+		warrior.y = land.y
+		warrior.moves_left = 2
+		var swim := session.submit({"type": "move_unit", "unit_id": warrior.id, "to": {"x": coast.x, "y": coast.y}})
+		_expect(failures, not bool(swim.get("ok", true)), "land units cannot enter coast")
+	var inland_city_site := _first_land(session.world, 6, 6)
+	var inland: GameWorld.City = session.world.add_city(1, inland_city_site.x, inland_city_site.y, "Oakhold")
+	if not session.world.city_is_coastal(inland):
+		var inland_prod := session.submit({"type": "set_production", "city_id": inland.id, "unit_type": "skiff"})
+		_expect(failures, not bool(inland_prod.get("ok", true)), "inland city cannot train a skiff")
+	var capture := session.submit({"type": "attack_city", "unit_id": skiff.id, "city_id": inland.id})
+	_expect(failures, not bool(capture.get("ok", true)), "skiff cannot capture a city")
+	var save_path := "user://crownfall_smoke_three.json"
+	_expect(failures, session.save_game(save_path), "wrote 3-host save")
+	var loaded := CrownMatch.new()
+	_expect(failures, loaded.load_game(save_path), "loaded 3-host save")
+	_expect(failures, loaded.world.players.size() == 3, "save/load keeps 3 players")
+	_expect(failures, loaded.world.get_player(3) != null, "Skelder survives the chronicle")
+	_expect(failures, loaded.world.width == 28, "save/load keeps the larger map")
+
+	var three := CrownMatch.new()
+	three.new_game(20260815, false)
+	for unit_variant in three.world.units.duplicate():
+		three.world.remove_unit(unit_variant)
+	var a := _first_land(three.world, 4, 4)
+	var b := _land_away(three.world, a.x, a.y, Defs.CITY_MIN_DISTANCE)
+	var c := _land_away_from(three.world, [a, b], Defs.CITY_MIN_DISTANCE)
+	three.world.add_city(1, a.x, a.y, "Rivermark")
+	var prey: GameWorld.City = three.world.add_city(2, b.x, b.y, "Embercairn")
+	var last: GameWorld.City = three.world.add_city(3, c.x, c.y, "Driftfen")
+	three.world.tile_at(prey.x, prey.y).terrain = "grass"
+	three.world.tile_at(last.x, last.y).terrain = "grass"
+	prey.culture_total = 0
+	last.culture_total = 0
+	prey.border_radius = 1
+	last.border_radius = 1
+	var step := _land_near(three.world, prey.x, prey.y, 1)
+	var bow: GameWorld.Unit = three.world.spawn_unit("bowman", step.x, step.y, 1)
+	_expect(failures, bow != null, "3-host domination: bowman")
+	if bow == null:
+		return
+	bow.x = step.x
+	bow.y = step.y
+	bow.moves_left = bow.max_moves
+	three.world.current_player_id = 1
+	three.submit({"type": "attack_city", "unit_id": bow.id, "city_id": prey.id})
+	_expect(failures, not three.world.game_over, "two rivals remaining is not domination")
+	var step2 := _land_near(three.world, last.x, last.y, 1)
+	var occ: GameWorld.Unit = three.world.unit_at(step2.x, step2.y)
+	if occ:
+		three.world.remove_unit(occ)
+	bow = three.world.spawn_unit("bowman", step2.x, step2.y, 1)
+	if bow:
+		bow.x = step2.x
+		bow.y = step2.y
+		bow.moves_left = bow.max_moves
+		three.submit({"type": "attack_city", "unit_id": bow.id, "city_id": last.id})
+	_expect(failures, three.world.game_over, "domination after the last rival city falls")
+	_expect(failures, three.world.winner_id == 1, "human wins 3-host domination")
+
+
+func _first_coast(world: GameWorld) -> Vector2i:
+	for y in world.height:
+		for x in world.width:
+			if world.tile_at(x, y).terrain == "coast" and world.unit_at(x, y) == null:
+				return Vector2i(x, y)
+	for y in world.height:
+		for x in world.width:
+			if Defs.is_water(world.tile_at(x, y).terrain):
+				return Vector2i(x, y)
+	return Vector2i(-1, -1)
+
+
+func _other_water(world: GameWorld, origin: Vector2i) -> Vector2i:
+	for d: Vector2i in Defs.DIRS:
+		var n := origin + d
+		if world.in_bounds(n.x, n.y) and Defs.is_water(world.tile_at(n.x, n.y).terrain) and world.unit_at(n.x, n.y) == null:
+			return n
+	for y in world.height:
+		for x in world.width:
+			if Vector2i(x, y) == origin:
+				continue
+			if Defs.is_water(world.tile_at(x, y).terrain) and world.unit_at(x, y) == null:
+				return Vector2i(x, y)
+	return Vector2i(-1, -1)
 
 
 func _land_away_from(world: GameWorld, points: Array, min_d: int) -> Vector2i:

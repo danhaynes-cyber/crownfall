@@ -46,11 +46,11 @@ Apply at most 32 actions per turn. `end_turn` stops the list.
 
 ## GameState
 
-`protocol_version` stays `1`. New fields are additive: `techs`, `faiths`,
-`civics`, `corporations`, `espionage`, `game_over`, `winner_id`,
-`victory_kind`, `victory_scores`, richer cities (`defense`, `garrison_count`,
-`religions`, `specialist_slots`, `assigned_specialists`, `corporations`),
-richer scores (`vassal_of`, `vassals`), richer `tiles`, and extra actions.
+`protocol_version` stays `1`. New fields are additive: `players` (N hosts),
+`techs`, `faiths`, `civics`, `corporations`, `espionage`, `game_over`,
+`winner_id`, `victory_kind`, `victory_scores`, richer cities, richer scores,
+richer `tiles`, and extra actions. The default map is 28×20. Units include
+`skiff` (water domain: coast and ocean).
 
 Fog of war is applied for `you`. Hidden tiles are omitted. Enemy units and
 cities appear only when the tile is currently visible.
@@ -61,8 +61,13 @@ cities appear only when the tile is currently visible.
   "game": "crownfall",
   "turn": 3,
   "you": 2,
+  "players": [
+    { "id": 1, "name": "Alden Host", "short_name": "Alden", "is_you": false, "is_human": true },
+    { "id": 2, "name": "Vesper Compact", "short_name": "Vesper", "is_you": true, "is_human": false },
+    { "id": 3, "name": "Skelder Host", "short_name": "Skelder", "is_you": false, "is_human": false }
+  ],
   "map": {
-    "width": 20,
+    "width": 28,
     "height": 20,
     "movement": "8-direction",
     "tile_shape": "square"
@@ -166,6 +171,7 @@ cities appear only when the tile is currently visible.
 | `espionage` | Your points per rival, income, and mission costs. Does not include a rival's private economy. |
 | `game_over` / `winner_id` / `victory_kind` | Match end. `winner_id` is `-1` on a stalemate. Kinds: `domination`, `score`, `stalemate`. |
 | `victory_scores` | Chronicle totals used for the turn-cap victory. |
+| `players` | Every host in the match (N ≥ 2). `is_you` marks the brain's side. |
 | `legal_actions` | Every action the rules engine would accept right now. Empty after `game_over`. |
 | `hooks` | Live: `civics`, `anarchy_turns`, `state_religion`, `vassal_of`, `vassals`, `corporations`, `espionage_points`. Also mirrors `researched`. |
 | `scores[].vassal_of` / `scores[].vassals` | Visible to every brain so a remote host can see the yoke. |
@@ -238,11 +244,11 @@ exposes only your points, costs, and legal missions.
 
 | `type` | Fields | Effect |
 | --- | --- | --- |
-| `move_unit` | `unit_id`, `to: {x,y}` | 8-direction land path. Roads cost 1. No water, no occupied tiles. |
+| `move_unit` | `unit_id`, `to: {x,y}` | 8-direction path. Land units stay on land. Skiffs enter coast and ocean. Roads cost 1. No occupied tiles. |
 | `attack` | `unit_id`, `target_unit_id` | Strength vs strength. Hills/forest aid the defender. Bowman range is 2 and does not occupy. |
 | `attack_city` | `unit_id`, `city_id` | Adjacent combat unit vs city defense. Capture on a strict win; otherwise the attacker loses 1 HP. |
 | `found_city` | `unit_id`, `name?` | Consume a settler on a legal land site at least 3 tiles from another city. Claims culture. |
-| `set_production` | `city_id`, `unit_type` | `settler`, `worker`, `warrior`, or `bowman` (needs Skyfletch). |
+| `set_production` | `city_id`, `unit_type` | `settler`, `worker`, `warrior`, `bowman` (Skyfletch), or `skiff` (coastal city). |
 | `work_tile` | `city_id`, `tile: {x,y}` | Assign a citizen to an adjacent **owned** land tile. |
 | `build_improvement` | `unit_id`, `improvement` | Laborer on the tile: farm (grass/plains/flood), mine (hills, Delving), camp (forest, Ashlar). |
 | `build_route` | `unit_id`, `route: "road"` | Laborer cuts a road on the current land tile. |
@@ -260,7 +266,13 @@ exposes only your points, costs, and legal missions.
 | `foment` | `city_id`, `cost?` | Spend 5 points. Cut stored production and culture in a visible rival city. |
 | `end_turn` | — | Stop this brain's list. |
 
-Units: `settler`, `worker` (laborer), `warrior`, `bowman`.
+Units: `settler`, `worker` (laborer), `warrior`, `bowman`, `skiff`.
+Skiffs fight only other water craft (strength vs strength) and cannot
+capture cities. Land units cannot enter water. Roads never go on water.
+
+A match has **N hosts**. Each computer host gets its own `AiBrain` instance
+and its own fog. Victory, vassals, faiths, corporations, and espionage
+iterate every player — they are not 1v1.
 
 ## RuleBrain policy
 
@@ -274,7 +286,7 @@ Only emit members of `legal_actions`. A later model adapter can mimic this:
 6. Escort: never walk a settler onto a tile adjacent to a visible rival combat unit unless a friendly combat unit is also adjacent.
 7. Attack a rival city only when strength beats its defense. Otherwise approach / siege. Do not suicide into a strong garrison.
 8. Remaining combat: walk toward a visible rival city; else one explores fog and extras hunt visible rivals.
-9. Production: combat if a rival city or threat is visible; laborer after the first city; settler before a second city; otherwise combat. Do not stamp endless warriors while the hinterland is unclaimed.
+9. Production: a skiff if a coastal city is boxed by water; otherwise combat if a rival city or threat is visible; laborer after the first city; settler before a second city; otherwise combat. Do not stamp endless warriors while the hinterland is unclaimed.
 10. Work the best owned adjacent tile.
 11. Adopt civics that match the plan (war → High Seat + Open Craft; expand/faith → Free Cantons + Open Craft; cash → Tithe). Never switch a civic already on the plan.
 12. Assign a chronicler when pushing culture or faith; a wright when training hosts.
@@ -284,6 +296,6 @@ Only emit members of `legal_actions`. A later model adapter can mimic this:
 
 ## Later systems
 
-No reserved BTS-shaped hooks remain. Culture borders, techs, capture,
-victory, faiths, civics, specialists, vassals, corporations, and
-espionage are live.
+No reserved BTS-shaped hooks remain. Three hosts, water craft, culture
+borders, techs, capture, victory, faiths, civics, specialists, vassals,
+corporations, and espionage are live.

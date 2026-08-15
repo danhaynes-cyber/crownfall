@@ -7,11 +7,15 @@ const AI_ID := 2
 var world: GameWorld
 var rules: RulesEngine
 var brain: AiBrain
+var brains: Dictionary = {}
 var last_snapshot: Dictionary = {}
 var last_ai_actions: Array = []
+var last_ai_ids: Array = []
 var last_rejected: PackedStringArray = PackedStringArray()
 var ai_waiting: bool = false
 var _turn_notes: PackedStringArray = PackedStringArray()
+var _ai_queue: Array = []
+var _active_ai_id: int = -1
 
 
 func new_game(seed_value: int, use_http: bool = false, http_url: String = "") -> void:
@@ -23,8 +27,8 @@ func new_game(seed_value: int, use_http: bool = false, http_url: String = "") ->
 	world.turn_number = 1
 	world.current_player_id = HUMAN_ID
 	rules.refresh_moves(world, HUMAN_ID)
-	world.log_event("Two hosts take the field. The hinterland is unclaimed.")
-	brain = _make_brain(use_http, http_url)
+	world.log_event("Three hosts take the field. The hinterland is unclaimed.")
+	configure_brain(use_http, http_url)
 
 
 static func has_save(path: String = "") -> bool:
@@ -56,16 +60,27 @@ func load_game(path: String = "") -> bool:
 	world.from_dict(parsed)
 	world.recompute_culture_borders()
 	rules = RulesEngine.new()
-	if brain == null:
-		brain = RuleBrain.new()
 	ai_waiting = false
 	last_ai_actions = []
+	last_ai_ids = []
 	last_rejected = PackedStringArray()
 	return true
 
 
 func configure_brain(use_http: bool, http_url: String = "") -> void:
-	brain = _make_brain(use_http, http_url)
+	brains.clear()
+	if world == null:
+		brain = _make_brain(use_http, http_url)
+		return
+	for player_variant in world.players:
+		var player: GameWorld.Player = player_variant
+		if player.is_human:
+			continue
+		brains[player.id] = _make_brain(use_http, http_url)
+	if not brains.is_empty():
+		brain = brains[brains.keys()[0]]
+	else:
+		brain = _make_brain(use_http, http_url)
 
 
 func _make_brain(use_http: bool, http_url: String) -> AiBrain:
@@ -141,46 +156,81 @@ func begin_end_human_turn() -> PackedStringArray:
 		ai_waiting = false
 		save_game()
 		return _turn_notes
-	world.current_player_id = AI_ID
-	rules.refresh_moves(world, AI_ID)
-	world.log_event("The Vesper Compact weighs the field.")
-	_turn_notes.append("The Vesper Compact weighs the field.")
 	last_rejected = PackedStringArray()
-	last_snapshot = snapshot_for(AI_ID)
-	if brain != null:
-		brain.begin_decide(last_snapshot)
+	last_ai_actions = []
+	last_ai_ids = []
+	_ai_queue = world.ai_player_ids()
+	if _begin_next_ai():
+		ai_waiting = true
 	else:
-		brain = RuleBrain.new()
-		brain.begin_decide(last_snapshot)
-	ai_waiting = true
+		_return_to_human()
+		ai_waiting = false
+		save_game()
 	return _turn_notes
 
 
 func poll_end_turn() -> Dictionary:
 	if not ai_waiting:
 		return {"done": true, "notes": _turn_notes}
-	var decided: Variant = brain.poll_decide() if brain else []
-	if decided == null:
-		return {"done": false, "notes": _turn_notes}
-	if typeof(decided) != TYPE_ARRAY:
-		decided = []
-	if not world.game_over:
-		_apply_ai_actions(decided)
-	if not world.game_over:
-		_finish_player_turn(AI_ID, _turn_notes)
+	while ai_waiting:
+		var active: AiBrain = brains.get(_active_ai_id, brain)
+		var decided: Variant = active.poll_decide() if active else []
+		if decided == null:
+			return {"done": false, "notes": _turn_notes}
+		if typeof(decided) != TYPE_ARRAY:
+			decided = []
+		last_ai_ids.append(_active_ai_id)
+		if not world.game_over:
+			_apply_ai_actions(decided)
+		if not world.game_over:
+			_finish_player_turn(_active_ai_id, _turn_notes)
+		if world.game_over:
+			ai_waiting = false
+			save_game()
+			return {"done": true, "notes": _turn_notes}
+		if not _begin_next_ai():
+			_return_to_human()
+			ai_waiting = false
+			save_game()
+			return {"done": true, "notes": _turn_notes}
+	return {"done": true, "notes": _turn_notes}
+
+
+func _begin_next_ai() -> bool:
+	if world.game_over:
+		return false
+	while not _ai_queue.is_empty():
+		var pid: int = int(_ai_queue.pop_front())
+		var player := world.get_player(pid)
+		if player == null:
+			continue
+		if world.cities_of(pid).is_empty() and world.units_of(pid).is_empty():
+			continue
+		world.current_player_id = pid
+		rules.refresh_moves(world, pid)
+		world.log_event("%s weighs the field." % player.display_name)
+		_turn_notes.append("%s weighs the field." % player.display_name)
+		last_snapshot = snapshot_for(pid)
+		var next_brain: AiBrain = brains.get(pid)
+		if next_brain == null:
+			next_brain = RuleBrain.new()
+			brains[pid] = next_brain
+		brain = next_brain
+		next_brain.begin_decide(last_snapshot)
+		_active_ai_id = pid
+		return true
+	return false
+
+
+func _return_to_human() -> void:
 	world.turn_number += 1
 	rules.evaluate_victory(world)
 	if world.game_over:
-		ai_waiting = false
-		save_game()
-		return {"done": true, "notes": _turn_notes}
+		return
 	world.current_player_id = HUMAN_ID
 	rules.refresh_moves(world, HUMAN_ID)
 	world.log_event("Turn %d begins for the Alden Host." % world.turn_number)
 	_turn_notes.append("Turn %d begins for the Alden Host." % world.turn_number)
-	ai_waiting = false
-	save_game()
-	return {"done": true, "notes": _turn_notes}
 
 
 func _finish_player_turn(player_id: int, notes: PackedStringArray) -> void:
@@ -191,10 +241,13 @@ func _finish_player_turn(player_id: int, notes: PackedStringArray) -> void:
 
 
 func _apply_ai_actions(decided: Array) -> void:
-	last_ai_actions = decided
+	for raw in decided:
+		last_ai_actions.append(raw)
 	if world.game_over:
 		return
 	var applied := 0
+	var actor := world.get_player(world.current_player_id)
+	var who := actor.display_name if actor else "A host"
 	for raw in decided:
 		if applied >= Defs.MAX_AI_ACTIONS:
 			break
@@ -213,8 +266,8 @@ func _apply_ai_actions(decided: Array) -> void:
 		else:
 			last_rejected.append("%s:%s" % [str(action.get("type", "?")), str(result.get("error", "rejected"))])
 	if applied == 0:
-		world.log_event("The Vesper Compact holds its ground.")
-		_turn_notes.append("The Vesper Compact holds its ground.")
+		world.log_event("%s holds its ground." % who)
+		_turn_notes.append("%s holds its ground." % who)
 
 
 func human() -> GameWorld.Player:

@@ -1,8 +1,9 @@
 # Crownfall
 
-An original 4X of hosts, hinterlands, and rival crowns. Two sides take a
-20×20 square-tile field. You lead the **Alden Host**. The **Vesper Compact**
-answers through an `AiBrain`.
+An original 4X of hosts, hinterlands, and rival crowns. Three sides take a
+28×20 square-tile field split by an inland sea. You lead the **Alden Host**.
+The **Vesper Compact** and **Skelder Host** each answer through their own
+`AiBrain`.
 
 This is original work. It is not affiliated with any other studio and ships
 no third-party art, music, or UI chrome.
@@ -19,12 +20,15 @@ no third-party art, music, or UI chrome.
 On the field:
 
 - Click a unit, then a highlighted tile to move (8 directions). Roads cost 1.
+  Unexplored tiles are black, explored tiles are dim, visible tiles are clear.
 - With a settler selected on a legal site, click **Found City** (or press `F`).
 - City culture claims the hinterland and grows the border (radius 2 at 10
   culture). Citizens only work tiles your culture owns. Rivals can contest
   the edge.
-- Click a city to train a **Warrior**, **Settler**, **Laborer**, or **Bowman**
-  (Bowman needs Skyfletch).
+- Click a city to train a **Warrior**, **Settler**, **Laborer**, **Bowman**
+  (Bowman needs Skyfletch), or **Skiff** (coastal cities only). Skiffs sail
+  coast and ocean, fight other craft, and cannot capture cities. Land units
+  cannot swim. Roads never go on water.
 - Select a laborer to **Raise Improvement** (farm / mine / camp) or **Cut Road**.
 - **Study** Delving (mines), Skyfletch (bowmen), or Ashlar (forest camps).
 - Click a rival unit to fight (bowmen can strike at range 2).
@@ -62,8 +66,9 @@ On the field:
 - **Save Chronicle** writes `user://crownfall_save.json` (Godot user data;
   on a Mac that is under Application Support). The title screen offers
   **Continue** when a save exists. **New Game** still starts a fresh match.
-- **End Turn** (or `Enter` / `Space`). The Compact then takes its turn without
-  freezing the map.
+- **End Turn** (or `Enter` / `Space`). Vesper and Skelder then take their
+  turns, each through its own brain, without freezing the map.
+- The side panel lists all three hosts and their city counts.
 - Camera: `WASD` or arrows, mouse wheel to zoom, right-drag to pan.
 
 Gold, science, and culture accumulate from cities. Science spends on the
@@ -98,16 +103,18 @@ GameState JSON -> AiBrain.decide(state) -> [Action, ...]
 - **RuleBrain** (default): settle, improve, garrison, escort, explore,
   research, found/adopt a faith, pick civics without thrashing, assign
   specialists, vassalize a weaker multi-city rival, found and spread
-  charters, spend spy points, and assault a city only when it should win.
+  charters, spend spy points, launch a skiff if boxed by water, and
+  assault a city only when it should win. Each computer host has its
+  own instance and fog.
 - **HttpBrain**: `POST` the snapshot to a URL; on timeout or error, fall
   back to RuleBrain. The match polls the HTTP client so the UI stays live.
 
 Brains do not touch Godot nodes. The rules engine rejects illegal moves.
-The snapshot includes fog of war, culture owners, cities (with defense,
-garrison, specialists, and charters), units, resources, scores, techs,
-faiths, civics, corporations, your espionage points, vassal ties, victory
-fields, and the legal action list. Brains never see a rival's private
-gold or science.
+The snapshot includes a `players` list of N hosts, fog of war, culture
+owners, cities (with defense, garrison, specialists, and charters), units
+(including skiffs), resources, scores, techs, faiths, civics, corporations,
+your espionage points, vassal ties, victory fields, and the legal action
+list. Brains never see a rival's private gold or science.
 
 See [`docs/AI_PROTOCOL.md`](docs/AI_PROTOCOL.md) and [`ai/README.md`](ai/README.md).
 
@@ -133,8 +140,9 @@ docs/AI_PROTOCOL.md    JSON schema for a later model API
 tools/run_smoke.sh     downloads nothing; uses Godot on PATH
 ```
 
-Culture borders, techs, capture, victory, faiths, civics, specialists,
-vassals, corporations, and espionage are live. `hooks.civics`,
+Three hosts, a 28×20 map with an inland sea, skiffs, culture borders,
+techs, capture, victory, faiths, civics, specialists, vassals,
+corporations, and espionage are live. `hooks.civics`,
 `hooks.state_religion`, `hooks.vassal_of`, `hooks.vassals`,
 `hooks.corporations`, `hooks.espionage_points`, and city specialist /
 charter fields are filled.
@@ -148,12 +156,13 @@ With Godot 4.4 on `PATH` as `godot`:
 ```
 
 The script imports the project, then runs `godot/tests/smoke_test.gd`. It
-starts a game, founds a city, grows culture, builds a farm and road, researches
-a craft, captures a city, founds and adopts a faith, adopts a civic, assigns a
-specialist, vassalizes a two-city loser, founds and spreads a charter, runs an
-espionage mission, hits a victory, reloads a save, ends the turn, checks
-RuleBrain garrison/escort/conquest/faith/civic/spy policy, and checks that
-HttpBrain falls back when the URL is dead.
+starts a 3-host game, founds a city, grows culture, builds a farm and road,
+researches a craft, captures a city, founds and adopts a faith, adopts a civic,
+assigns a specialist, vassalizes a two-city loser, founds and spreads a charter,
+runs an espionage mission, sails a skiff, hits a victory, reloads a 3-player
+save, ends the turn (both computer hosts), checks RuleBrain
+garrison/escort/conquest/faith/civic/spy policy, and checks that HttpBrain
+falls back when the URL is dead.
 
 CI runs the same path on Linux. Develop on Linux or Mac; export the `.app`
 from a Mac with Godot's macOS export templates.

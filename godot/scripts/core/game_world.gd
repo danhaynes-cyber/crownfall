@@ -105,6 +105,13 @@ func setup_players() -> void:
 	vesper.is_human = false
 	vesper.color = Color(0.58, 0.40, 0.78)
 	players.append(vesper)
+	var skelder := Player.new()
+	skelder.id = 3
+	skelder.display_name = "Skelder Host"
+	skelder.short_name = "Skelder"
+	skelder.is_human = false
+	skelder.color = Color(0.78, 0.42, 0.28)
+	players.append(skelder)
 
 
 func in_bounds(x: int, y: int) -> bool:
@@ -186,7 +193,7 @@ func add_tile(x: int, y: int, terrain: String) -> Tile:
 
 
 func spawn_unit(unit_type: String, x: int, y: int, owner_id: int) -> Unit:
-	var dest := _spawn_tile(x, y)
+	var dest := _spawn_tile(x, y, unit_type)
 	if dest == Vector2i(-1, -1):
 		return null
 	var info := Defs.unit_info(unit_type)
@@ -208,15 +215,53 @@ func spawn_unit(unit_type: String, x: int, y: int, owner_id: int) -> Unit:
 	return u
 
 
-func _spawn_tile(x: int, y: int) -> Vector2i:
-	if in_bounds(x, y) and unit_at(x, y) == null and Defs.is_land(tile_at(x, y).terrain):
+func _spawn_tile(x: int, y: int, unit_type: String = "warrior") -> Vector2i:
+	if _can_place_unit(x, y, unit_type):
 		return Vector2i(x, y)
 	for d in Defs.DIRS:
 		var nx := x + d.x
 		var ny := y + d.y
-		if in_bounds(nx, ny) and unit_at(nx, ny) == null and Defs.is_land(tile_at(nx, ny).terrain):
+		if _can_place_unit(nx, ny, unit_type):
 			return Vector2i(nx, ny)
+	if Defs.is_water_craft(unit_type):
+		for radius in range(2, 4):
+			for y2 in range(y - radius, y + radius + 1):
+				for x2 in range(x - radius, x + radius + 1):
+					if _can_place_unit(x2, y2, unit_type):
+						return Vector2i(x2, y2)
 	return Vector2i(-1, -1)
+
+
+func _can_place_unit(x: int, y: int, unit_type: String) -> bool:
+	if not in_bounds(x, y) or unit_at(x, y) != null:
+		return false
+	var tile := tile_at(x, y)
+	return tile != null and Defs.can_unit_enter_terrain(unit_type, tile.terrain)
+
+
+func can_unit_enter(unit: Unit, x: int, y: int) -> bool:
+	if unit == null:
+		return false
+	return _can_place_unit(x, y, unit.unit_type) or (in_bounds(x, y) and unit_at(x, y) == null and Defs.can_unit_enter_terrain(unit.unit_type, tile_at(x, y).terrain))
+
+
+func city_is_coastal(city: City) -> bool:
+	if city == null:
+		return false
+	for pos in city_radius_tiles(city):
+		var tile := tile_at(pos.x, pos.y)
+		if tile != null and Defs.is_water(tile.terrain):
+			return true
+	return false
+
+
+func ai_player_ids() -> Array:
+	var ids: Array = []
+	for player_variant in players:
+		var player: Player = player_variant
+		if not player.is_human:
+			ids.append(player.id)
+	return ids
 
 
 func remove_unit(unit: Unit) -> void:
@@ -282,7 +327,7 @@ func reachable_tiles(unit: Unit) -> Dictionary:
 			if not in_bounds(nxt.x, nxt.y):
 				continue
 			var tile := tile_at(nxt.x, nxt.y)
-			if tile == null or not Defs.is_land(tile.terrain):
+			if tile == null or not Defs.can_unit_enter_terrain(unit.unit_type, tile.terrain):
 				continue
 			if unit_at(nxt.x, nxt.y) != null:
 				continue

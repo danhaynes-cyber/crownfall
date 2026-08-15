@@ -82,7 +82,7 @@ def choose_actions(state: dict) -> list:
         ):
             take(action)
     for action in legal:
-        if action.get("type") == "set_production" and action.get("unit_type") in ("worker", "settler", "warrior"):
+        if action.get("type") == "set_production" and action.get("unit_type") in ("worker", "settler", "warrior", "skiff"):
             if not any(a.get("type") == "set_production" and a.get("city_id") == action.get("city_id") for a in chosen):
                 take(action)
     chosen.append({"type": "end_turn"})

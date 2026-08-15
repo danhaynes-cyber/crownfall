@@ -12,8 +12,9 @@ func generate(world: GameWorld, seed_value: int) -> void:
 	rng.seed = seed_value
 	_paint_base(world, rng)
 	_paint_water_edges(world, rng)
-	_cluster_terrain(world, rng, "hills", 3, 5)
-	_cluster_terrain(world, rng, "forest", 4, 7)
+	_carve_inland_water(world, rng)
+	_cluster_terrain(world, rng, "hills", 4, 5)
+	_cluster_terrain(world, rng, "forest", 5, 7)
 	_coastline(world)
 	_carve_rivers(world, rng)
 	_place_resources(world, rng)
@@ -52,6 +53,31 @@ func _paint_water_edges(world: GameWorld, rng: RandomNumberGenerator) -> void:
 			for x in range(cx - radius, cx + radius + 1):
 				if world.in_bounds(x, y) and Defs.chebyshev(cx, cy, x, y) <= radius:
 					world.tile_at(x, y).terrain = "ocean"
+
+
+func _carve_inland_water(world: GameWorld, rng: RandomNumberGenerator) -> void:
+	var cx := int(world.width * 0.42) + rng.randi_range(-1, 1)
+	var cy := int(world.height * 0.45)
+	var rx := 3
+	var ry := 2
+	for y in range(cy - ry, cy + ry + 1):
+		for x in range(cx - rx, cx + rx + 1):
+			if not world.in_bounds(x, y):
+				continue
+			var dx := (x - cx) / float(rx)
+			var dy := (y - cy) / float(ry)
+			if dx * dx + dy * dy <= 1.15:
+				world.tile_at(x, y).terrain = "ocean"
+	var channel_x := cx + rng.randi_range(-1, 0)
+	for y in range(cy, world.height - 1):
+		for dx in range(-1, 2):
+			var x := channel_x + dx
+			if world.in_bounds(x, y):
+				world.tile_at(x, y).terrain = "ocean"
+	var spur_y := cy + rng.randi_range(-1, 1)
+	for x in range(cx, mini(cx + 4, world.width - 2)):
+		if world.in_bounds(x, spur_y):
+			world.tile_at(x, spur_y).terrain = "ocean"
 
 
 func _cluster_terrain(world: GameWorld, rng: RandomNumberGenerator, terrain: String, seeds: int, radius: int) -> void:
@@ -145,9 +171,9 @@ func _nearest_water(world: GameWorld, from: Vector2i) -> Vector2i:
 
 func _place_resources(world: GameWorld, rng: RandomNumberGenerator) -> void:
 	var plan := [
-		{"id": "grain", "terrains": ["grass", "plains"], "count": 4},
-		{"id": "timber", "terrains": ["forest"], "count": 3},
-		{"id": "ore", "terrains": ["hills"], "count": 3},
+		{"id": "grain", "terrains": ["grass", "plains"], "count": 6},
+		{"id": "timber", "terrains": ["forest"], "count": 5},
+		{"id": "ore", "terrains": ["hills"], "count": 5},
 	]
 	for spec in plan:
 		var spots: Array[Vector2i] = []
@@ -170,16 +196,29 @@ func _place_resources(world: GameWorld, rng: RandomNumberGenerator) -> void:
 
 
 func _place_starting_hosts(world: GameWorld, rng: RandomNumberGenerator) -> void:
-	var human := _find_start(world, Vector2i(3, world.height - 4), Vector2i(2, 2))
-	var ai := _find_start(world, Vector2i(world.width - 4, 3), Vector2i(-2, -2))
-	if human == Vector2i(-1, -1):
-		human = _any_settle_tile(world)
-	if ai == Vector2i(-1, -1) or Defs.chebyshev(human.x, human.y, ai.x, ai.y) < 8:
-		ai = _farthest_from(world, human)
-	_seed_host(world, 1, human, rng)
-	_seed_host(world, 2, ai, rng)
-	world.recompute_visibility(1)
-	world.recompute_visibility(2)
+	var hints := [
+		{"id": 1, "hint": Vector2i(3, world.height - 4), "step": Vector2i(2, -1)},
+		{"id": 2, "hint": Vector2i(world.width - 4, 3), "step": Vector2i(-2, 1)},
+		{"id": 3, "hint": Vector2i(world.width - 4, world.height - 4), "step": Vector2i(-2, 0)},
+	]
+	var placed: Array[Vector2i] = []
+	for spec in hints:
+		var origin: Vector2i = _find_start(world, spec["hint"], spec["step"])
+		if origin == Vector2i(-1, -1):
+			origin = _farthest_from_many(world, placed)
+		if not placed.is_empty() and Defs.chebyshev(origin.x, origin.y, placed[0].x, placed[0].y) < 8:
+			origin = _farthest_from_many(world, placed)
+		for other in placed:
+			if Defs.chebyshev(origin.x, origin.y, other.x, other.y) < 8:
+				origin = _farthest_from_many(world, placed)
+				break
+		if origin == Vector2i(-1, -1):
+			origin = _any_settle_tile(world)
+		placed.append(origin)
+		_seed_host(world, int(spec["id"]), origin, rng)
+	for player_variant in world.players:
+		var player: GameWorld.Player = player_variant
+		world.recompute_visibility(player.id)
 
 
 func _find_start(world: GameWorld, hint: Vector2i, step: Vector2i) -> Vector2i:
@@ -226,15 +265,24 @@ func _any_settle_tile(world: GameWorld) -> Vector2i:
 
 
 func _farthest_from(world: GameWorld, other: Vector2i) -> Vector2i:
+	return _farthest_from_many(world, [other])
+
+
+func _farthest_from_many(world: GameWorld, others: Array) -> Vector2i:
 	var best := Vector2i(world.width - 5, 4)
 	var best_d := -1
 	for y in range(2, world.height - 2):
 		for x in range(2, world.width - 2):
 			if not _is_start_tile(world, x, y):
 				continue
-			var d := Defs.chebyshev(other.x, other.y, x, y)
-			if d > best_d:
-				best_d = d
+			var nearest := 999
+			if others.is_empty():
+				nearest = Defs.chebyshev(x, y, 0, 0)
+			else:
+				for other in others:
+					nearest = mini(nearest, Defs.chebyshev(x, y, int(other.x), int(other.y)))
+			if nearest > best_d:
+				best_d = nearest
 				best = Vector2i(x, y)
 	return best
 

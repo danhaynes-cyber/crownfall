@@ -2,7 +2,7 @@ class_name Defs
 extends Object
 
 const PROTOCOL_VERSION := 1
-const MAP_W := 20
+const MAP_W := 28
 const MAP_H := 20
 const TILE_PX := 48
 const CITY_MIN_DISTANCE := 3
@@ -40,10 +40,11 @@ const IMPROVEMENT_BONUS := {
 }
 
 const UNIT_TYPES := {
-	"settler": {"strength": 0, "max_hp": 1, "moves": 2, "cost": 20, "can_found": true, "can_build": false, "range": 1, "requires_tech": ""},
-	"worker": {"strength": 0, "max_hp": 1, "moves": 2, "cost": 12, "can_found": false, "can_build": true, "range": 1, "requires_tech": ""},
-	"warrior": {"strength": 2, "max_hp": 2, "moves": 2, "cost": 10, "can_found": false, "can_build": false, "range": 1, "requires_tech": ""},
-	"bowman": {"strength": 3, "max_hp": 2, "moves": 2, "cost": 14, "can_found": false, "can_build": false, "range": 2, "requires_tech": "skyfletch"},
+	"settler": {"strength": 0, "max_hp": 1, "moves": 2, "cost": 20, "can_found": true, "can_build": false, "range": 1, "requires_tech": "", "domain": "land"},
+	"worker": {"strength": 0, "max_hp": 1, "moves": 2, "cost": 12, "can_found": false, "can_build": true, "range": 1, "requires_tech": "", "domain": "land"},
+	"warrior": {"strength": 2, "max_hp": 2, "moves": 2, "cost": 10, "can_found": false, "can_build": false, "range": 1, "requires_tech": "", "domain": "land"},
+	"bowman": {"strength": 3, "max_hp": 2, "moves": 2, "cost": 14, "can_found": false, "can_build": false, "range": 2, "requires_tech": "skyfletch", "domain": "land"},
+	"skiff": {"strength": 2, "max_hp": 2, "moves": 3, "cost": 12, "can_found": false, "can_build": false, "range": 1, "requires_tech": "", "domain": "water"},
 }
 
 const TECHS := {
@@ -119,6 +120,7 @@ const SPY_FOMENT_CULTURE := 2
 const CITY_NAME_POOLS := {
 	1: ["Rivermark", "Oakhold", "Goldensill", "Thornwatch", "Dawnmere", "Hartford"],
 	2: ["Embercairn", "Nightwell", "Ashfen", "Gloamrest", "Vesperhold", "Duskbarrow"],
+	3: ["Driftfen", "Gullward", "Kelpholt", "Brinewatch", "Seaharrow", "Saltmere"],
 }
 
 
@@ -191,6 +193,20 @@ static func can_build(unit_type: String) -> bool:
 
 static func is_combat(unit_type: String) -> bool:
 	return unit_strength(unit_type) > 0
+
+
+static func unit_domain(unit_type: String) -> String:
+	return str(unit_info(unit_type).get("domain", "land"))
+
+
+static func is_water_craft(unit_type: String) -> bool:
+	return unit_domain(unit_type) == "water"
+
+
+static func can_unit_enter_terrain(unit_type: String, terrain: String) -> bool:
+	if is_water_craft(unit_type):
+		return terrain == "coast" or terrain == "ocean"
+	return is_land(terrain)
 
 
 static func required_tech(unit_type: String) -> String:
@@ -342,5 +358,7 @@ static func unit_letter(unit_type: String) -> String:
 			return "L"
 		"bowman":
 			return "B"
+		"skiff":
+			return "K"
 		_:
 			return "W"

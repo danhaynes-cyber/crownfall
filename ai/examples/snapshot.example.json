@@ -3,8 +3,13 @@
   "game": "crownfall",
   "turn": 1,
   "you": 2,
+  "players": [
+    { "id": 1, "name": "Alden Host", "short_name": "Alden", "is_you": false, "is_human": true },
+    { "id": 2, "name": "Vesper Compact", "short_name": "Vesper", "is_you": true, "is_human": false },
+    { "id": 3, "name": "Skelder Host", "short_name": "Skelder", "is_you": false, "is_human": false }
+  ],
   "map": {
-    "width": 20,
+    "width": 28,
     "height": 20,
     "movement": "8-direction",
     "tile_shape": "square"

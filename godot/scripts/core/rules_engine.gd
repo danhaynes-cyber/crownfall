@@ -79,6 +79,8 @@ func list_legal_actions(world: GameWorld, player_id: int) -> Array:
 					continue
 				if not world.is_hostile(player_id, foe.owner_id):
 					continue
+				if Defs.unit_domain(unit.unit_type) != Defs.unit_domain(foe.unit_type):
+					continue
 				if Defs.chebyshev(unit.x, unit.y, foe.x, foe.y) <= reach_range:
 					actions.append({
 						"type": "attack",
@@ -90,6 +92,8 @@ func list_legal_actions(world: GameWorld, player_id: int) -> Array:
 				if rival.owner_id == player_id:
 					continue
 				if not world.is_hostile(player_id, rival.owner_id):
+					continue
+				if Defs.is_water_craft(unit.unit_type):
 					continue
 				if Defs.chebyshev(unit.x, unit.y, rival.x, rival.y) == 1:
 					actions.append({
@@ -129,6 +133,8 @@ func list_legal_actions(world: GameWorld, player_id: int) -> Array:
 		var researched: Array = owner.researched if owner else []
 		for unit_type in Defs.UNIT_TYPES.keys():
 			if not Defs.can_produce(String(unit_type), researched):
+				continue
+			if Defs.is_water_craft(String(unit_type)) and not world.city_is_coastal(city):
 				continue
 			actions.append({
 				"type": "set_production",
@@ -301,8 +307,8 @@ func _move_unit(world: GameWorld, action: Dictionary) -> Dictionary:
 	if tx == unit.x and ty == unit.y:
 		return _fail("already_there")
 	var tile := world.tile_at(tx, ty)
-	if tile == null or not Defs.is_land(tile.terrain):
-		return _fail("cannot_enter_water")
+	if tile == null or not Defs.can_unit_enter_terrain(unit.unit_type, tile.terrain):
+		return _fail("cannot_enter")
 	if world.unit_at(tx, ty) != null:
 		return _fail("tile_occupied")
 	var cost := world.path_exists(unit, tx, ty)
@@ -330,6 +336,8 @@ func _attack(world: GameWorld, action: Dictionary) -> Dictionary:
 		return _fail("not_hostile")
 	if unit.strength <= 0:
 		return _fail("cannot_attack")
+	if Defs.unit_domain(unit.unit_type) != Defs.unit_domain(target.unit_type):
+		return _fail("wrong_domain")
 	if unit.moves_left < 1:
 		return _fail("no_moves")
 	var fight_range := Defs.unit_range(unit.unit_type)
@@ -419,6 +427,8 @@ func _set_production(world: GameWorld, action: Dictionary) -> Dictionary:
 	var researched: Array = owner.researched if owner else []
 	if not Defs.can_produce(unit_type, researched):
 		return _fail("tech_locked")
+	if Defs.is_water_craft(unit_type) and not world.city_is_coastal(city):
+		return _fail("needs_coast")
 	if city.production_type != unit_type:
 		city.stored_production = 0
 	city.production_type = unit_type
@@ -540,6 +550,8 @@ func _attack_city(world: GameWorld, action: Dictionary) -> Dictionary:
 		return _fail("not_hostile")
 	if unit.strength <= 0:
 		return _fail("cannot_attack")
+	if Defs.is_water_craft(unit.unit_type):
+		return _fail("cannot_capture")
 	if unit.moves_left < 1:
 		return _fail("no_moves")
 	if Defs.chebyshev(unit.x, unit.y, city.x, city.y) != 1:

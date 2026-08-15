@@ -33,6 +33,7 @@ var _warrior: Button
 var _settler: Button
 var _worker: Button
 var _bowman: Button
+var _skiff: Button
 var _improve: Button
 var _road: Button
 var _research_btns: Dictionary = {}
@@ -120,7 +121,9 @@ func _ready() -> void:
 	_worker = _add_btn(side_panel, "Train Laborer", y, func(): produce_pressed.emit("worker"))
 	y += 24
 	_bowman = _add_btn(side_panel, "Train Bowman", y, func(): produce_pressed.emit("bowman"))
-	y += 24
+	y += 22
+	_skiff = _add_btn(side_panel, "Train Skiff", y, func(): produce_pressed.emit("skiff"))
+	y += 22
 	_improve = _add_btn(side_panel, "Raise Improvement", y, func(): build_improvement_pressed.emit())
 	y += 24
 	_road = _add_btn(side_panel, "Cut Road", y, func(): build_route_pressed.emit())
@@ -162,7 +165,7 @@ func _ready() -> void:
 	_help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_help.add_theme_color_override("font_color", Color(0.78, 0.72, 0.60))
 	_help.add_theme_font_size_override("font_size", 11)
-	_help.text = "Charters need a worked resource. Spy points accrue each turn: scout, steal a craft, or foment a visible city."
+	_help.text = "Coastal cities train skiffs. Unexplored is black; explored is dim. Charters need a worked resource. Spy points accrue each turn."
 	side_panel.add_child(_help)
 
 	_end = Button.new()
@@ -228,6 +231,8 @@ func refresh() -> void:
 			_worker.disabled = true
 		if _bowman:
 			_bowman.disabled = true
+		if _skiff:
+			_skiff.disabled = true
 		if _improve:
 			_improve.disabled = true
 		if _road:
@@ -301,6 +306,8 @@ func refresh() -> void:
 		_worker.disabled = city == null
 	if _bowman:
 		_bowman.disabled = city == null or not Defs.can_produce("bowman", researched)
+	if _skiff:
+		_skiff.disabled = city == null or not world.city_is_coastal(city)
 	var can_labor := unit != null and Defs.can_build(unit.unit_type) and unit.moves_left > 0
 	var tile: GameWorld.Tile = world.tile_at(unit.x, unit.y) if unit else null
 	if _improve:
@@ -380,6 +387,8 @@ func refresh() -> void:
 			_worker.disabled = true
 		if _bowman:
 			_bowman.disabled = true
+		if _skiff:
+			_skiff.disabled = true
 		if _improve:
 			_improve.disabled = true
 		if _road:
@@ -410,6 +419,14 @@ func refresh() -> void:
 
 func _side_text(world: GameWorld) -> String:
 	var bits: PackedStringArray = PackedStringArray()
+	var host_bits: PackedStringArray = PackedStringArray()
+	for player_variant in world.players:
+		var host: GameWorld.Player = player_variant
+		var n: int = world.cities_of(host.id).size()
+		var mark := "*" if host.id == CrownMatch.HUMAN_ID else ""
+		host_bits.append("%s%s %dc" % [host.short_name, mark, n])
+	if not host_bits.is_empty():
+		bits.append("[b]Hosts[/b]  %s\n" % " · ".join(host_bits))
 	if world.in_bounds(hover.x, hover.y) and world.is_explored(CrownMatch.HUMAN_ID, hover.x, hover.y):
 		var tile := world.tile_at(hover.x, hover.y)
 		var yld := world.tile_yield_at(hover.x, hover.y)

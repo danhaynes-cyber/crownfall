@@ -76,12 +76,13 @@ func _draw_tile(world: GameWorld, x: int, y: int) -> void:
 	var explored := world.is_explored(viewer_id, x, y)
 	var visible := world.is_visible(viewer_id, x, y)
 	if not explored:
-		draw_rect(rect, Color(0.04, 0.05, 0.07))
+		draw_rect(rect, Color(0.02, 0.02, 0.03))
 		return
 	var tile := world.tile_at(x, y)
 	var color: Color = TERRAIN_COLOR.get(tile.terrain, Color.GRAY)
 	if not visible:
-		color = color.darkened(0.45)
+		color = color.lerp(Color(0.16, 0.16, 0.18), 0.58)
+		color = color.darkened(0.22)
 	draw_rect(rect, color)
 	if tile.terrain == "hills":
 		_draw_hill_mark(rect, visible)
@@ -99,7 +100,10 @@ func _draw_tile(world: GameWorld, x: int, y: int) -> void:
 		_draw_improvement(rect, tile.improvement, visible)
 	if tile.route == "road":
 		_draw_road(world, x, y, visible)
-	draw_rect(rect, Color(0, 0, 0, 0.18), false, 1.0)
+	if visible:
+		draw_rect(rect, Color(0.08, 0.07, 0.05, 0.16), false, 1.0)
+	else:
+		draw_rect(rect, Color(0.02, 0.02, 0.03, 0.42), false, 1.0)
 
 
 func _draw_hill_mark(rect: Rect2, visible: bool) -> void:

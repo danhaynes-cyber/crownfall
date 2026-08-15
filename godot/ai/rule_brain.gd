@@ -16,9 +16,10 @@ extends AiBrain
 ##    approach / siege. Do not suicide into a strong garrison.
 ## 8. Remaining combat: walk toward a visible rival city; else one explores
 ##    fog and extras hunt visible rivals.
-## 9. Production: warrior/bowman if a rival city or threat is visible;
-##    worker after the first city; settler before a second city; otherwise
-##    combat. Never endless warriors while the hinterland is still unclaimed.
+## 9. Production: a skiff if a coastal city is boxed by water; otherwise
+##    warrior/bowman if a rival city or threat is visible; worker after
+##    the first city; settler before a second city; otherwise combat.
+##    Never endless warriors while the hinterland is still unclaimed.
 ## 10. Work the best owned adjacent tile. End turn.
 ## 11. Adopt civics that match the plan (war → High Seat + Open Craft;
 ##     expand/faith → Free Cantons + Open Craft; cash → Tithe). Never
@@ -162,7 +163,7 @@ func _own_cities(state: Dictionary) -> Array:
 
 
 func _is_combat(unit: Dictionary) -> bool:
-	return int(unit.get("strength", 0)) > 0
+	return int(unit.get("strength", 0)) > 0 and str(unit.get("type", "")) != "skiff"
 
 
 func _war_plan(state: Dictionary) -> bool:
@@ -720,7 +721,13 @@ func _best_production(state: Dictionary, legal: Array) -> Array:
 	var want := "warrior"
 	var techs: Dictionary = state.get("techs", {})
 	var researched: Array = techs.get("researched", [])
-	if threatened:
+	var own_skiffs := 0
+	for unit in _own_units(state):
+		if str(unit.get("type", "")) == "skiff":
+			own_skiffs += 1
+	if _boxed_by_water(state) and own_skiffs == 0 and _can_train(legal, "skiff"):
+		want = "skiff"
+	elif threatened:
 		want = "bowman" if researched.has("skyfletch") else "warrior"
 	elif own_cities >= 1 and own_workers == 0:
 		want = "worker"
@@ -743,6 +750,32 @@ func _best_production(state: Dictionary, legal: Array) -> Array:
 		out.append(action)
 		assigned[city_id] = true
 	return out
+
+
+func _can_train(legal: Array, unit_type: String) -> bool:
+	for action in _of_type(legal, "set_production"):
+		if str(action.get("unit_type", "")) == unit_type:
+			return true
+	return false
+
+
+func _boxed_by_water(state: Dictionary) -> bool:
+	for city in _own_cities(state):
+		var cx := int(city.get("x", 0))
+		var cy := int(city.get("y", 0))
+		var water := 0
+		var land := 0
+		for tile in state.get("tiles", []):
+			if maxi(absi(int(tile.get("x", 0)) - cx), absi(int(tile.get("y", 0)) - cy)) != 1:
+				continue
+			var terrain := str(tile.get("terrain", ""))
+			if terrain == "coast" or terrain == "ocean":
+				water += 1
+			elif terrain in ["grass", "plains", "hills", "forest"]:
+				land += 1
+		if water >= 4 or (water >= 3 and land <= 3):
+			return true
+	return false
 
 
 func _best_work_tiles(state: Dictionary, legal: Array) -> Array:
