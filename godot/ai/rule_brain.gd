@@ -4,7 +4,7 @@ extends AiBrain
 ## Policy a later LLM adapter can mimic (only emit from legal_actions):
 ## 1. Research the next useful craft (Delving, Skyfletch, Ashlar).
 ## 2. Found a city on the best legal site; prefer own or adjacent culture.
-## 3. Workers: improve or road the current tile, else walk to a high-value
+## 3. Laborers: improve or road the current tile, else walk to a high-value
 ##    owned tile that still needs work. Do not leave laborers idle.
 ## 4. Defend: if a city has no combat unit within 1 and a rival is visible
 ##    (or the city is empty), walk the nearest combat unit home.
