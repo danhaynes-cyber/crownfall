@@ -1,4 +1,6 @@
 .godot/
+__pycache__/
+*.pyc
 *.uid
 export_credentials.cfg
 dist/
