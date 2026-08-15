@@ -18,6 +18,8 @@ fi
 echo "Using $GODOT"
 "$GODOT" --version
 
+python3 "$ROOT/ai/examples/test_openai_brain_server.py"
+
 # First pass writes .godot import cache so class_name scripts resolve.
 "$GODOT" --headless --path "$ROOT/godot" --import --quit >/tmp/crownfall-import.log 2>&1 || true
 "$GODOT" --headless --path "$ROOT/godot" --quit >/tmp/crownfall-import2.log 2>&1 || true

@@ -2,7 +2,7 @@
 """Tiny Crownfall HttpBrain endpoint.
 
 Accepts the documented GameState POST and returns actions chosen only from
-legal_actions. Swap the handler body for a model API later — no keys required.
+legal_actions. For an OpenAI-compatible model see openai_brain_server.py.
 
     python3 ai/examples/http_brain_server.py
     export CROWNFALL_AI_URL=http://127.0.0.1:8765/decide

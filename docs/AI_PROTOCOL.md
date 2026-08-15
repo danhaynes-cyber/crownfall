@@ -22,7 +22,8 @@ GameState snapshot (JSON) -> AiBrain.decide(state) -> [Action, ...]
 - Default: `RuleBrain`.
 - `HttpBrain` is used when `CROWNFALL_AI_URL` is set, or when
   `godot/ai/http_config.json` has a non-empty `url`.
-- Timeout: `timeout_ms` in that file (default 2500).
+- Timeout: `CROWNFALL_AI_TIMEOUT_MS`, or `timeout_ms` in that file (default 2500).
+  Use ~20000 when the sidecar calls a model.
 - Example endpoint (no API keys):
 
 ```bash
@@ -30,8 +31,10 @@ python3 ai/examples/http_brain_server.py
 export CROWNFALL_AI_URL=http://127.0.0.1:8765/decide
 ```
 
-The sample server only returns actions drawn from `legal_actions`. Replace
-`choose_actions` with a model call later.
+- OpenAI-compatible sidecar: `ai/examples/openai_brain_server.py`. It POSTs
+  the snapshot to Chat Completions when `OPENAI_API_KEY` is set
+  (`OPENAI_BASE_URL` / `OPENAI_MODEL` optional). Without a key it returns
+  the same local heuristic. Illegal model actions are dropped.
 
 ## HTTP contract
 

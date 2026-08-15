@@ -107,6 +107,9 @@ func _configured_http_url() -> String:
 
 
 func _configured_timeout_ms() -> int:
+	var env_timeout := OS.get_environment("CROWNFALL_AI_TIMEOUT_MS")
+	if env_timeout != "":
+		return maxi(1, int(env_timeout))
 	if FileAccess.file_exists("res://ai/http_config.json"):
 		var parsed = JSON.parse_string(FileAccess.get_file_as_string("res://ai/http_config.json"))
 		if typeof(parsed) == TYPE_DICTIONARY:

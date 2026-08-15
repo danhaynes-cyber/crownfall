@@ -147,6 +147,27 @@ export CROWNFALL_AI_URL="http://127.0.0.1:8765/decide"
 
 or set `url` in `godot/ai/http_config.json`.
 
+## Plug in a modern API
+
+Point the computer hosts at an OpenAI-compatible Chat Completions API.
+No key is required to start the game; without one the sidecar plays from
+`legal_actions` like the tiny example brain. Illegal model output is
+dropped. `HttpBrain` stays async and still falls back to RuleBrain on a
+dead URL or timeout.
+
+```bash
+export OPENAI_API_KEY="sk-..."          # omit to use the local heuristic
+export OPENAI_BASE_URL="https://api.openai.com/v1"   # optional; any compatible host
+export OPENAI_MODEL="gpt-4o-mini"                    # optional
+python3 ai/examples/openai_brain_server.py
+export CROWNFALL_AI_URL="http://127.0.0.1:8765/decide"
+export CROWNFALL_AI_TIMEOUT_MS=20000
+```
+
+Then Play → New Game. `OPENAI_BASE_URL` can be a local proxy
+(`http://127.0.0.1:11434/v1`) or another compatible host. Do not put keys
+in the repo.
+
 ## Repository layout
 
 ```
@@ -156,6 +177,7 @@ godot/                 Godot 4 project (open this on a Mac)
   scripts/view/        2D map + HUD
   tests/smoke_test.gd  headless first-slice check
 ai/                    pointer to the in-process brains
+  examples/            HttpBrain stand-in + OpenAI-compatible sidecar
 docs/AI_PROTOCOL.md    JSON schema for a later model API
 tools/run_smoke.sh     downloads nothing; uses Godot on PATH
 ```
@@ -175,7 +197,8 @@ With Godot 4.4 on `PATH` as `godot`:
 ./tools/run_smoke.sh
 ```
 
-The script imports the project, then runs `godot/tests/smoke_test.gd`. It
+The script runs `ai/examples/test_openai_brain_server.py` (no paid API),
+imports the project, then runs `godot/tests/smoke_test.gd`. It
 starts a 3-host game, founds a city, grows culture, builds a farm and road,
 researches a craft, captures a city, founds and adopts a faith, adopts a civic,
 assigns a specialist, vassalizes a two-city loser, founds and spreads a charter,
